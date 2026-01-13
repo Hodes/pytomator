@@ -1,0 +1,14 @@
+[project]
+name = "hodes-pytomator"
+version = "0.1.0"
+description = "Python automation editor"
+requires-python = ">=3.10"
+
+dependencies = [
+    "PyQt6",
+    "PyQt6-QScintilla",
+    "pyautogui",
+    "keyboard",
+    "mss",
+    "pillow"
+]
