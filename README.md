@@ -12,6 +12,12 @@ A Python application to run automations
    ```
 
 2. Install Dependencies
+
    ```bash
    pip install -e .
+   ```
+
+3. Run the Application
+   ```bash
+   python -m pytomator.app
    ```
