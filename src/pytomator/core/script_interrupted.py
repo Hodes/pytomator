@@ -1,0 +1,2 @@
+class ScriptInterrupted(Exception):
+    pass

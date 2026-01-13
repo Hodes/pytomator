@@ -1,6 +1,0 @@
-PySide6
-PySide6-QScintilla
-pyautogui
-keyboard
-mss
-pillow

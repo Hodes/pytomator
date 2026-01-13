@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout,
-    QPushButton, QCheckBox
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+    QPushButton, QCheckBox, QFileDialog,
+    QMessageBox, QLineEdit
 )
 
 from pytomator.editor import CodeEditor
@@ -14,12 +15,25 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Hodes Pytomator")
 
+        self.current_script_path = QLineEdit()
+        self.load_button = QPushButton("Load Script")
+        self.save_button = QPushButton("Save Script")
         self.editor = CodeEditor()
         self.loop_checkbox = QCheckBox("Loop script")
         self.run_button = QPushButton("Run")
         self.is_running = False
+        
+        fileLayout = QHBoxLayout()
+        fileLayout.addWidget(self.current_script_path)
+        fileLayout.addWidget(self.load_button)
+        
+        actionButtonsLayout = QHBoxLayout()
+        actionButtonsLayout.addWidget(self.save_button)
+        actionButtonsLayout.addStretch()
 
         layout = QVBoxLayout()
+        layout.addLayout(fileLayout)
+        layout.addLayout(actionButtonsLayout)
         layout.addWidget(self.editor)
         layout.addWidget(self.loop_checkbox)
         layout.addWidget(self.run_button)
@@ -27,21 +41,55 @@ class MainWindow(QMainWindow):
         central = QWidget()
         central.setLayout(layout)
         self.setCentralWidget(central)
+        
+        # File Handling
+        self.load_button.clicked.connect(self.on_click_load_script)
+        self.save_button.clicked.connect(self.on_click_save_script)
 
         # Runner
         self.runner = ScriptRunner(
             get_code_callback=self.editor.get_code
         )
         self.runner.on("started", lambda: self.on_runner_state_change(True))
-        self.runner.on("finished", lambda: self.on_runner_state_change(False))        
+        self.runner.on("finished", lambda: self.on_runner_state_change(False))
+        self.runner.on("interrupted", lambda: self.on_runner_state_change(False))
 
         # Botão
         self.run_button.clicked.connect(self.run_toggle)
 
         # Hotkey global
         self.hotkeys = HotkeyManager()
-        self.hotkeys.register("ctrl+alt+r", self.run_toggle)
-        
+        self.hotkeys.register("f10", self.run_toggle)
+
+
+    def on_click_load_script(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select Script", "", "Python Files (*.py);;All Files (*)"
+        )
+        if path:
+            try:
+                with open(path, 'r', encoding='utf-8') as file:
+                    code = file.read()
+                self.editor.setText(code)
+                self.current_script_path.setText(path)
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to load script:\n{e}")
+    
+    def on_click_save_script(self):
+        path = self.current_script_path.text()
+        if not path:
+            path, _ = QFileDialog.getSaveFileName(
+                self, "Save Script", "", "Python Files (*.py);;All Files (*)"
+            )
+            if not path:
+                return
+            self.current_script_path.setText(path)
+        try:
+            with open(path, 'w', encoding='utf-8') as file:
+                file.write(self.editor.get_code())
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save script:\n{e}")
+    
     def update_run_button(self, is_running: bool):
         if is_running:
             self.run_button.setText("Stop")

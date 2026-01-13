@@ -22,7 +22,7 @@ class CodeEditor(QsciScintilla):
 
         # Aparência
         self.setCaretLineVisible(True)
-        self.setCaretLineBackgroundColor(QColor("#c2c2c2"))
+        self.setCaretLineBackgroundColor(QColor("#92e6ff55"))
 
         self.setBraceMatching(QsciScintilla.BraceMatch.SloppyBraceMatch)
 
