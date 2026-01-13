@@ -1,5 +1,13 @@
 {
-  "python.defaultInterpreterPath": "${workspaceFolder}/venv/bin/python",
+  "windows": {
+    "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe"
+  },
+  "linux": {
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
+  },
+  "mac": {
+    "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python"
+  },
   "python.analysis.extraPaths": ["src"],
   "python.terminal.activateEnvironment": true
 }

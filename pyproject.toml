@@ -1,10 +1,12 @@
 [project]
-name = "hodes-pytomator"
+name = "pytomator"
 version = "0.1.0"
-description = "Python automation editor"
-requires-python = ">=3.10"
+description = "Python scripted automation tool"
+requires-python = ">=3.12,<3.15"
+package-mode = false
 
 dependencies = [
+    "PySide6",
     "PyQt6",
     "PyQt6-QScintilla",
     "pyautogui",

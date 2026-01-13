@@ -7,14 +7,24 @@ A Python application to run automations
 1. Virtual Environment (optional but recommended)
 
    ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows use `venv\Scripts\activate`
+   python -m venv .venv
+   source .venv/bin/activate  # On Windows use `.venv\Scripts\activate`
    ```
 
 2. Install Dependencies
 
+   ### Poetry
+
+   Install Poetry if you haven't already:
+
    ```bash
-   pip install -e .
+   pip install poetry
+   ```
+
+   Then install dependencies:
+
+   ```bash
+   poetry install
    ```
 
 3. Run the Application

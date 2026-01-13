@@ -8,10 +8,8 @@ from pytomator.core.script_interrupted import ScriptInterrupted
 from pytomator.core.global_interruption_controller import GlobalInterruptionController, should_stop
 
 class ScriptRunner(EventEmitter):
-    def __init__(self, get_code_callback):
+    def __init__(self):
         super().__init__()
-
-        self.get_code = get_code_callback
 
         self._running = False
         self.runner_thread = None
@@ -28,6 +26,9 @@ class ScriptRunner(EventEmitter):
             for name, value in automator_api.__dict__.items()
             if not name.startswith("_")
         }
+    
+    def set_get_code_callback(self, callback):
+        self.get_code = callback
 
     # -------------------------
     # Controls

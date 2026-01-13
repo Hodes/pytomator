@@ -2,17 +2,19 @@
 __pycache__/
 __pycache__
 *.py[cod]
+resources_rc.py
 
 # Virtualenv
 venv/
 .venv/
 
-# VSCode
-.vscode/
-
 # OS
 .DS_Store
 Thumbs.db
+
+# build artifacts
+dist/
+build/
 
 src/hodes_pytomator.egg-info/
 src/pytomator.egg-info/
