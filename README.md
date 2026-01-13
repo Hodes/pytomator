@@ -27,7 +27,13 @@ A Python application to run automations
    poetry install
    ```
 
-3. Run the Application
+3. Build resources
+
+   ```bash
+   poetry run build_resources
+   ```
+
+4. Run the Application
    ```bash
    python -m pytomator.app
    ```

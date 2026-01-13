@@ -1,13 +1,15 @@
+import sys
 import time
 import pyautogui
-import pydirectinput
 from pytomator.core.global_interruption_controller import should_stop
 from pytomator.core.script_interrupted import ScriptInterrupted
 
 ENTER = "enter"
 ESC = "esc"
 
-use_direct_input_keys = True
+use_direct_input_keys = sys.platform == "win32"
+if use_direct_input_keys:
+    import pydirectinput
 
 def direct_input_keys( state: bool = True):
     global use_direct_input_keys
