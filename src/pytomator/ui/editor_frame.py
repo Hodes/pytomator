@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QMessageBox, QLineEdit
 )
 
-from pytomator.editor import CodeEditor
+from pytomator.ui.widgets import CodeEditor
 from pytomator.core.hotkey_manager import HotkeyManager
 from pytomator.config import ConfigManager
 
@@ -48,6 +48,7 @@ class EditorFrame(QWidget):
         self.runner.on("started", lambda: self.on_runner_state_change(True))
         self.runner.on("finished", lambda: self.on_runner_state_change(False))
         self.runner.on("interrupted", lambda: self.on_runner_state_change(False))
+        self.runner.on("line_executing", self.editor.highlight_line)
 
         # Botão
         self.run_button.clicked.connect(self.run_toggle)
@@ -105,6 +106,11 @@ class EditorFrame(QWidget):
 
     def on_runner_state_change(self, is_running: bool):
         self.update_run_button(is_running)
+        if not is_running:
+            self.editor.setReadOnly(False)
+            self.editor.clearExecutionMarker()
+        else:
+            self.editor.setReadOnly(True)
     
     def run_toggle(self):
         if self.runner._running:

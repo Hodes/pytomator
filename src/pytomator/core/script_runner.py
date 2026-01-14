@@ -1,6 +1,7 @@
 import threading
 import time
 import sys
+from typing import Callable
 
 from pytomator.core.events import EventEmitter
 from pytomator.core.automator import api as automator_api
@@ -13,6 +14,8 @@ class ScriptRunner(EventEmitter):
 
         self._running = False
         self.runner_thread = None
+        self._last_lineno = None
+        self._script_frame = None
 
         self.script_globals = {
             "__builtins__": __builtins__,
@@ -27,7 +30,7 @@ class ScriptRunner(EventEmitter):
             if not name.startswith("_")
         }
     
-    def set_get_code_callback(self, callback):
+    def set_get_code_callback(self, callback: Callable[[], str]):
         self.get_code = callback
 
     # -------------------------
@@ -65,24 +68,48 @@ class ScriptRunner(EventEmitter):
     def _trace(self, frame, event, arg):
         if GlobalInterruptionController.is_global_interruption_requested():
             raise ScriptInterrupted()
+        
+        if frame.f_code.co_filename != "<string>":
+            return self._trace
+        
+        if self._script_frame is None:
+            self._script_frame = frame
+        
+        # Se não for o frame do script, apenas retorne o trace padrão
+        if frame is not self._script_frame:
+            return self._trace
+                
+        if event == "line" and self._last_lineno != frame.f_lineno:
+            # print(frame.f_code.co_filename, event, frame.f_lineno)
+            lineno = frame.f_lineno
+            self._last_lineno = lineno
+            self.emit("line_executing", lineno)
         return self._trace
 
     def _run(self, loop):
         sys.settrace(self._trace)
+        self._last_lineno = None
+        self._script_frame = None
 
         try:
             while self._running:
                 code = self.get_code()
 
+                # is empty code?
+                if not code.strip():
+                    break
+                
                 try:
                     self.emit("before_execute")
+                    
+                    sys.settrace(self._trace)
                     exec(code, self.script_globals)
                 except ScriptInterrupted:
                     self.emit("interrupted")
                     break
                 except Exception as e:
                     self.emit("error", e)
-                    print("Erro no script:", e)
+                    print("Script error:", e)
                     break
                 finally:
                     self.emit("after_execute")
@@ -95,6 +122,9 @@ class ScriptRunner(EventEmitter):
                 
         except ScriptInterrupted:
             self.emit("interrupted")
+        except Exception as e:
+            self.emit("error", e)
+            print("Script error:", e)
         finally:
             sys.settrace(None)
             self._running = False
