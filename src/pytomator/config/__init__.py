@@ -1,1 +1,2 @@
-from .settings import load_config, save_config
+from .config_manager import ConfigManager
+from .default_config import get_default_config

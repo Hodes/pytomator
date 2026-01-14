@@ -94,7 +94,6 @@ class ScriptRunner(EventEmitter):
                 time.sleep(0.1)
                 
         except ScriptInterrupted:
-            # 🔥 Captura interrupção disparada FORA do exec
             self.emit("interrupted")
         finally:
             sys.settrace(None)

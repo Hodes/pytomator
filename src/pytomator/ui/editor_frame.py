@@ -6,8 +6,8 @@ from PyQt6.QtWidgets import (
 )
 
 from pytomator.editor import CodeEditor
-from pytomator.core.script_runner import ScriptRunner
 from pytomator.core.hotkey_manager import HotkeyManager
+from pytomator.config import ConfigManager
 
 class EditorFrame(QWidget):
     def __init__(self, script_runner):
@@ -54,10 +54,20 @@ class EditorFrame(QWidget):
 
         # Hotkey global
         self.hotkeys = HotkeyManager()
-        self.hotkeys.register("f10", self.run_toggle)
+        config_manager = ConfigManager.get_instance()
+        config_manager.on("config_applied", self.on_config_applied)
+        self.on_config_applied(config_manager.config)
 
     def get_code(self) -> str:
         return self.editor.get_code()
+    
+    def on_config_applied(self, config):
+        hotkeys = config.get("hotkeys", {})
+        toggle_script_key = hotkeys.get("toggle_script", "F10")
+        try:
+            self.hotkeys.register("toggle_script", toggle_script_key.lower(), self.run_toggle)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to register hotkey '{toggle_script_key}':\n{e}")
 
     def on_click_load_script(self):
         path, _ = QFileDialog.getOpenFileName(

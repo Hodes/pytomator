@@ -3,15 +3,13 @@ import keyboard
 
 class HotkeyManager:
     def __init__(self):
-        self._hotkey = None
+        self._registered_hotkeys = {}
 
-    def register(self, hotkey, callback):
-        if self._hotkey:
-            keyboard.remove_hotkey(self._hotkey)
+    def register(self, action, hotkey, callback):
+        self.unregister(action)
+        self._registered_hotkeys[action] = keyboard.add_hotkey(hotkey, callback)
 
-        self._hotkey = keyboard.add_hotkey(hotkey, callback)
-
-    def unregister(self):
-        if self._hotkey:
-            keyboard.remove_hotkey(self._hotkey)
-            self._hotkey = None
+    def unregister(self, action):
+        if self._registered_hotkeys.get(action):
+            keyboard.remove_hotkey(self._registered_hotkeys[action])
+            del self._registered_hotkeys[action]
