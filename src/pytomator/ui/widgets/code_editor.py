@@ -38,7 +38,7 @@ class CodeEditor(QsciScintilla):
         
         self.EXECUTION_INDICATOR = 0
         self.indicatorDefine(QsciScintilla.IndicatorStyle.FullBoxIndicator, self.EXECUTION_INDICATOR)
-        self.setIndicatorForegroundColor(QColor(0, 120, 215, 60), self.EXECUTION_INDICATOR)
+        self.setIndicatorForegroundColor(QColor(0, 180, 0, 100), self.EXECUTION_INDICATOR)
         self.setIndicatorDrawUnder(True)
 
     def get_code(self) -> str:

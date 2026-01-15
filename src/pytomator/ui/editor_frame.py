@@ -4,6 +4,7 @@ from PyQt6.QtWidgets import (
     QPushButton, QCheckBox, QFileDialog,
     QMessageBox, QLineEdit
 )
+import qtawesome as qta
 
 from pytomator.ui.widgets import CodeEditor
 from pytomator.core.hotkey_manager import HotkeyManager
@@ -51,6 +52,7 @@ class EditorFrame(QWidget):
         self.runner.on("line_executing", self.editor.highlight_line)
 
         # Botão
+        self.update_run_button(False)
         self.run_button.clicked.connect(self.run_toggle)
 
         # Hotkey global
@@ -101,8 +103,12 @@ class EditorFrame(QWidget):
     def update_run_button(self, is_running: bool):
         if is_running:
             self.run_button.setText("Stop")
+            self.run_button.setIcon(qta.icon("fa6s.stop"))
+            self.run_button.setToolTip("Stop script execution")
         else:
             self.run_button.setText("Run")
+            self.run_button.setIcon(qta.icon("fa6s.play"))
+            self.run_button.setToolTip("Run script")
 
     def on_runner_state_change(self, is_running: bool):
         self.update_run_button(is_running)
