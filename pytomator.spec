@@ -23,6 +23,8 @@ exe = EXE(
     a.datas,
     [],
     name='pytomator',
+    icon='assets/app.ico',
+    version='assets/version_info.txt',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
