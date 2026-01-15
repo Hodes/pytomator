@@ -30,6 +30,10 @@ def wait(seconds: float = 1, check_interval: float = 0.05):
         remaining = end_time - time.monotonic()
         time.sleep(min(check_interval, max(0, remaining)))
 
+def check_interruption():
+    if should_stop():
+        raise ScriptInterrupted()
+
 def click(x=None, y=None):
     if x is None or y is None:
         pyautogui.click()

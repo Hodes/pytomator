@@ -43,3 +43,8 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("Script is running...")
         else:
             self.statusBar().showMessage("Script is stopped.")
+    
+    def closeEvent(self, event):
+        if self.script_runner.is_running():
+            self.script_runner.stop()
+        event.accept()

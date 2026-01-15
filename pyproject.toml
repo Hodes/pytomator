@@ -10,11 +10,8 @@ packages = [{ include = "pytomator", from = "src" }]
 python = ">=3.12,<3.15"
 
 # UI + Editor
-PyQt6 = "^6.7"
-PyQt6-QScintilla = "^2.14"
-
-# Qt tooling (build only)
-PySide6 = "^6.7"
+pyqt6 = "^6.10.2"
+pyqt6-qscintilla = "^2.14.1"
 
 # Automation
 pyautogui = "^0.9"
@@ -31,3 +28,9 @@ build-resources = "tools.build_resources:main"
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
+
+[dependency-groups]
+dev = [
+    "pyinstaller (>=6.18.0,<7.0.0)",
+    "pyside6 (>=6.10.1,<7.0.0)",
+]

@@ -16,6 +16,7 @@ class ScriptRunner(EventEmitter):
         self.runner_thread = None
         self._last_lineno = None
         self._script_frame = None
+        self._code = ""
 
         self.script_globals = {
             "__builtins__": __builtins__,
@@ -30,34 +31,46 @@ class ScriptRunner(EventEmitter):
             if not name.startswith("_")
         }
     
-    def set_get_code_callback(self, callback: Callable[[], str]):
-        self.get_code = callback
+    def set_code(self, code: str):
+        self._code = code
 
     # -------------------------
     # Controls
     # -------------------------
+    
+    def is_running(self) -> bool:
+        return self._running
 
-    def start(self, loop=False):
+    def start(self, code: str, loop=False):
         if self._running:
             return
 
+        self.set_code(code)
+        # is empty code?
+        if not self._code.strip():
+            return
+        
+        self.stop()
         GlobalInterruptionController.clear_global_interruption()
         self._running = True
 
         self.runner_thread = threading.Thread(
             target=self._run,
             args=(loop,),
-            daemon=True
+            daemon=False
         )
         self.runner_thread.start()
 
         self.emit("started")
 
     def stop(self):
-        if not self._running:
-            return
+        if self._running:
+            self.emit("stopping")
         GlobalInterruptionController.request_global_interruption()
-        self.emit("stopping")
+        self._running = False
+        if self.runner_thread and self.runner_thread.is_alive():
+            self.runner_thread.join(timeout=1.0)
+        
 
     def should_stop(self) -> bool:
         return GlobalInterruptionController.is_global_interruption_requested()
@@ -91,19 +104,25 @@ class ScriptRunner(EventEmitter):
         self._last_lineno = None
         self._script_frame = None
 
+        # is empty code?
+        if not self._code.strip():
+            self.stop()
+            return
+        
+        # Aways append to the code a check for interruption
+        code_to_run = self._code + "\ncheck_interruption()\n"
+        
         try:
             while self._running:
-                code = self.get_code()
-
-                # is empty code?
-                if not code.strip():
-                    break
-                
+                # print("Thread is still running...")
                 try:
                     self.emit("before_execute")
                     
                     sys.settrace(self._trace)
-                    exec(code, self.script_globals)
+                    exec(code_to_run, self.script_globals)
+                    
+                    if should_stop():
+                        raise ScriptInterrupted()
                 except ScriptInterrupted:
                     self.emit("interrupted")
                     break
@@ -128,4 +147,5 @@ class ScriptRunner(EventEmitter):
         finally:
             sys.settrace(None)
             self._running = False
+            GlobalInterruptionController.clear_global_interruption()
             self.emit("finished")

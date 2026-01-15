@@ -45,7 +45,7 @@ class EditorFrame(QWidget):
 
         # Runner
         self.runner = script_runner
-        self.runner.set_get_code_callback(self.get_code)
+        
         self.runner.on("started", lambda: self.on_runner_state_change(True))
         self.runner.on("finished", lambda: self.on_runner_state_change(False))
         self.runner.on("interrupted", lambda: self.on_runner_state_change(False))
@@ -113,13 +113,10 @@ class EditorFrame(QWidget):
     def on_runner_state_change(self, is_running: bool):
         self.update_run_button(is_running)
         if not is_running:
-            self.editor.setReadOnly(False)
             self.editor.clearExecutionMarker()
-        else:
-            self.editor.setReadOnly(True)
     
     def run_toggle(self):
         if self.runner._running:
             self.runner.stop()
         else:
-            self.runner.start(loop=self.loop_checkbox.isChecked())
+            self.runner.start(self.get_code(), loop=self.loop_checkbox.isChecked())

@@ -34,5 +34,17 @@ def main():
         print("STDOUT:\n", result.stdout)
     if result.stderr:
         print("STDERR:\n", result.stderr)
+        
+    if result.returncode != 0:
+        print("Error: Resource compilation failed.")
+    
+    if result.returncode == 0:
+        # Replace PySide6 imports with PyQt6 imports
+        with open(out, 'r', encoding='utf-8') as file:
+            content = file.read()
+        content = content.replace('from PySide6', 'from PyQt6')
+        with open(out, 'w', encoding='utf-8') as file:
+            file.write(content)
+        print("Resource compilation succeeded.")
 
     result.check_returncode()

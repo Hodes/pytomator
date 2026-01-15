@@ -24,16 +24,40 @@ A Python application to run automations
    Then install dependencies:
 
    ```bash
-   poetry install
+   poetry install --with dev
    ```
 
 3. Build resources
 
    ```bash
-   poetry run build_resources
+   poetry run build-resources
    ```
 
 4. Run the Application
+
    ```bash
-   python -m pytomator.app
+   poetry run pytomator
    ```
+
+5. Packaging
+
+   To create a standalone executable, use PyInstaller:
+
+   ```bash
+   poetry install --only main,build
+   ```
+
+   Then run:
+
+   ```bash
+   poetry run pyinstaller pytomator.spec
+   ```
+
+   The executable will be located in the `dist` directory.
+
+## Usage
+
+Run the application and use the GUI to write and execute Python scripts for automating tasks.
+
+It has an api of wrappers around common operations to facilitate automation.
+Check 'src/pytomator/core/automator/api.py' for available functions.
