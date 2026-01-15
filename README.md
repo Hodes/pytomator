@@ -44,12 +44,6 @@ A Python application to run automations
    To create a standalone executable, use PyInstaller:
 
    ```bash
-   poetry install --only main,build
-   ```
-
-   Then run:
-
-   ```bash
    poetry run pyinstaller pytomator.spec
    ```
 
