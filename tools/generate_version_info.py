@@ -1,16 +1,22 @@
 from pathlib import Path
 import tomllib
 
+ROOT = Path.cwd()
+
+# ROOT = Path(__file__).resolve().parent
+PYPROJECT = ROOT / "pyproject.toml"
+INIT_FILE = ROOT / "src" / "pytomator" / "__init__.py"
+
 def main():
-    ROOT = Path.cwd()
-
-    pyproject = tomllib.loads(
-        (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    )
-
-    version = pyproject["tool"]["poetry"]["version"]
+    with PYPROJECT.open("rb") as f:
+      data = tomllib.load(f)
+    version = data["tool"]["poetry"]["version"]
     major, minor, patch = version.split(".")
-
+    
+    update_version_info(version, major, minor, patch)
+    update_app_version(version)
+  
+def update_version_info(version, major, minor, patch):
     content = f"""
 VSVersionInfo(
   ffi=FixedFileInfo(
@@ -46,5 +52,15 @@ VSVersionInfo(
 
     out = ROOT / "tools" / "version_info.txt"
     out.write_text(content, encoding="utf-8")
+    
+    print(f"✅ Version info generated ({version})")
+    
+def update_app_version(version):
+  content = f'''# Auto-generated
+# Do not edit manually
 
-    print(f"Version info generated ({version})")
+__version__ = "{version}"
+'''
+  INIT_FILE.parent.mkdir(parents=True, exist_ok=True)
+  INIT_FILE.write_text(content, encoding="utf-8")
+  print(f"✅ Updated __init__.py with version {version}")
