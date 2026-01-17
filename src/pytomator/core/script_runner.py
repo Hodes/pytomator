@@ -100,7 +100,6 @@ class ScriptRunner(EventEmitter):
         return self._trace
 
     def _run(self, loop):
-        sys.settrace(self._trace)
         self._last_lineno = None
         self._script_frame = None
 
@@ -113,12 +112,12 @@ class ScriptRunner(EventEmitter):
         code_to_run = self._code + "\ncheck_interruption()\n"
         
         try:
+            sys.settrace(self._trace)
             while self._running:
                 # print("Thread is still running...")
                 try:
                     self.emit("before_execute")
                     
-                    sys.settrace(self._trace)
                     exec(code_to_run, self.script_globals)
                     
                     if should_stop():
@@ -127,10 +126,11 @@ class ScriptRunner(EventEmitter):
                     self.emit("interrupted")
                     break
                 except Exception as e:
-                    self.emit("error", e)
-                    print("Script error:", e)
+                    self.emit("error", str(e))
                     break
                 finally:
+                    self._last_lineno = None
+                    self._script_frame = None
                     self.emit("after_execute")
                 
 
@@ -143,7 +143,6 @@ class ScriptRunner(EventEmitter):
             self.emit("interrupted")
         except Exception as e:
             self.emit("error", e)
-            print("Script error:", e)
         finally:
             sys.settrace(None)
             self._running = False
