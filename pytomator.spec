@@ -1,9 +1,20 @@
 # -*- mode: python ; coding: utf-8 -*-
+import tomllib
+from pathlib import Path
+
+ROOT = Path.cwd()
+
+pyproject = tomllib.loads(
+    (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+)
+
+version = pyproject["tool"]["poetry"]["version"]
+exe_name = f"Pytomator_v-{version.replace('.', '-')}"
 
 
 a = Analysis(
     ['src\\pytomator\\app.py'],
-    pathex=[],
+    pathex=[str(ROOT / "src")],
     binaries=[],
     datas=[],
     hiddenimports=[],
@@ -22,7 +33,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='pytomator',
+    name=exe_name,
     icon='assets/app.ico',
     version='assets/version_info.txt',
     debug=False,

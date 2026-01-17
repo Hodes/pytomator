@@ -41,10 +41,10 @@ A Python application to run automations
 
 5. Packaging
 
-   To create a standalone executable, use PyInstaller:
+   To create a standalone executable, use build script:
 
    ```bash
-   poetry run pyinstaller pytomator.spec
+   poetry run build
    ```
 
    The executable will be located in the `dist` directory.

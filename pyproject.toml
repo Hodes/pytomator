@@ -24,6 +24,8 @@ qtawesome = "^1.4.0"
 [tool.poetry.scripts]
 pytomator = "pytomator.app:main"
 build-resources = "tools.build_resources:main"
+gen-version = "tools.generate_version_info:main"
+build = "tools.build:main"
 
 [build-system]
 requires = ["poetry-core"]
