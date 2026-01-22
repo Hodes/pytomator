@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pytomator"
-version = "0.1.1"
+version = "0.1.2"
 description = "Python scripted automation tool"
 authors = ["Henrique Otavio <https://github.com/hodes>"]
 readme = "README.md"
