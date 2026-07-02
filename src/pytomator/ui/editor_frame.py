@@ -4,7 +4,7 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QCheckBox,
+    QPushButton, QCheckBox, QLineEdit,
     QMessageBox, QLabel, QComboBox,
     QInputDialog, QFileDialog
 )
@@ -20,6 +20,8 @@ from pytomator.project.manager import ProjectManager
 class EditorFrame(QWidget):
 
     script_error_signal = pyqtSignal(str)
+    _run_script_hotkey_signal = pyqtSignal(str)  # Emitted from hotkey thread, handled on main thread
+    _toggle_script_signal = pyqtSignal()          # Thread-safe toggle for global hotkey
 
     def __init__(self, script_runner, project_manager: ProjectManager):
         super().__init__()
@@ -71,6 +73,25 @@ class EditorFrame(QWidget):
 
         # ── Run controls ────────────────────────────────────────
         self.loop_checkbox = QCheckBox("Loop script")
+        self.loop_checkbox.toggled.connect(self._on_loop_toggled)
+
+        # ── Hotkey per script ───────────────────────────────────
+        hotkey_layout = QHBoxLayout()
+        hotkey_layout.addWidget(QLabel("Script hotkey:"))
+        self.hotkey_input = QLineEdit()
+        self.hotkey_input.setPlaceholderText("e.g. ctrl+shift+f6")
+        self.hotkey_input.setToolTip("Enter a hotkey combination for this script")
+        hotkey_layout.addWidget(self.hotkey_input)
+        self.set_hotkey_btn = QPushButton("Set")
+        self.set_hotkey_btn.setIcon(qta.icon("fa6s.check"))
+        self.set_hotkey_btn.clicked.connect(self._on_set_hotkey)
+        hotkey_layout.addWidget(self.set_hotkey_btn)
+        self.clear_hotkey_btn = QPushButton("Clear")
+        self.clear_hotkey_btn.setIcon(qta.icon("fa6s.xmark"))
+        self.clear_hotkey_btn.clicked.connect(self._on_clear_hotkey)
+        hotkey_layout.addWidget(self.clear_hotkey_btn)
+        hotkey_layout.addStretch()
+
         self.run_button = QPushButton("Run")
         self.is_running = False
 
@@ -81,6 +102,7 @@ class EditorFrame(QWidget):
         layout.addWidget(self.editor)
         layout.addWidget(self.error_status)
         layout.addWidget(self.loop_checkbox)
+        layout.addLayout(hotkey_layout)
         layout.addWidget(self.run_button)
         self.setLayout(layout)
 
@@ -102,6 +124,10 @@ class EditorFrame(QWidget):
         config_manager.on("config_applied", self.on_config_applied)
         self.on_config_applied(config_manager.config)
 
+        # ── Thread-safe hotkey signals ──────────────────────────
+        self._run_script_hotkey_signal.connect(self._on_run_script_hotkey)
+        self._toggle_script_signal.connect(self.run_toggle)
+
         # ── Other signals ───────────────────────────────────────
         self.script_error_signal.connect(self._on_script_error_update)
         self.update_script_error()
@@ -113,6 +139,7 @@ class EditorFrame(QWidget):
         self.project_manager.on("script_removed", self._on_project_changed)
         self.project_manager.on("script_renamed", self._on_project_changed)
         self.project_manager.on("active_script_changed", self._on_active_script_changed)
+        self.project_manager.on("script_hotkey_changed", self._on_script_hotkey_changed)
 
         self._refresh_script_list()
 
@@ -158,6 +185,9 @@ class EditorFrame(QWidget):
         self.delete_script_btn.setEnabled(has_script)
         self.run_button.setEnabled(has_script)
         self.loop_checkbox.setEnabled(has_script)
+        self.hotkey_input.setEnabled(has_script)
+        self.set_hotkey_btn.setEnabled(has_script)
+        self.clear_hotkey_btn.setEnabled(has_script)
 
         if has_script:
             script_name = self.script_selector.currentText()
@@ -165,9 +195,20 @@ class EditorFrame(QWidget):
             if script:
                 self.editor.setText(script.code)
                 self.current_script_name = script_name
+                self._load_script_properties(script)
         else:
             self.editor.clear()
             self.current_script_name = None
+            self.loop_checkbox.setChecked(False)
+            self.hotkey_input.clear()
+
+    def _load_script_properties(self, script):
+        """Load loop and hotkey from a script into the UI controls."""
+        self.loop_checkbox.blockSignals(True)
+        self.loop_checkbox.setChecked(script.loop)
+        self.loop_checkbox.blockSignals(False)
+
+        self.hotkey_input.setText(script.hotkey or "")
 
     # ------------------------------------------------------------------
     # Slots
@@ -260,12 +301,65 @@ class EditorFrame(QWidget):
         self.project_manager.update_script_code(self.current_script_name, code)
 
     # ------------------------------------------------------------------
+    # Loop checkbox
+    # ------------------------------------------------------------------
+
+    def _on_loop_toggled(self, checked: bool):
+        """Persist loop state immediately when toggled."""
+        if not self.current_script_name or not self.project_manager.is_project_open:
+            return
+        self.project_manager.update_script_loop(self.current_script_name, checked)
+
+    # ------------------------------------------------------------------
+    # Hotkey per script
+    # ------------------------------------------------------------------
+
+    def _on_set_hotkey(self):
+        """Set or change the hotkey for the current script."""
+        if not self.current_script_name or not self.project_manager.is_project_open:
+            return
+
+        hotkey = self.hotkey_input.text().strip().lower()
+        if not hotkey:
+            QMessageBox.warning(self, "Invalid Hotkey", "Please enter a hotkey combination.")
+            return
+
+        # Validate against other project scripts
+        is_valid, message = self.project_manager.validate_hotkey(hotkey, exclude_script=self.current_script_name)
+        if not is_valid:
+            # Conflict found - ask if user wants to replace
+            reply = QMessageBox.question(
+                self, "Hotkey Conflict",
+                f"{message}\n\nDo you want to reassign this hotkey to the current script?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                return
+            # Find the conflicting script and clear its hotkey
+            for script in self.project_manager.list_scripts():
+                if script.name != self.current_script_name and script.hotkey and script.hotkey.lower() == hotkey:
+                    self.project_manager.update_script_hotkey(script.name, None)
+                    break
+
+        # Set the hotkey
+        self.project_manager.update_script_hotkey(self.current_script_name, hotkey)
+        # _on_script_hotkey_changed will reinstall all hotkeys
+
+    def _on_clear_hotkey(self):
+        """Clear the hotkey for the current script."""
+        if not self.current_script_name or not self.project_manager.is_project_open:
+            return
+        self.project_manager.update_script_hotkey(self.current_script_name, None)
+        self.hotkey_input.clear()
+
+    # ------------------------------------------------------------------
     # Project change handlers
     # ------------------------------------------------------------------
 
     def _on_project_changed(self, *args):
         """Refresh the entire script list when the project changes."""
         self._refresh_script_list()
+        self._install_all_hotkeys()
 
     def _on_active_script_changed(self, name: str):
         """Load the newly active script into the editor."""
@@ -282,18 +376,69 @@ class EditorFrame(QWidget):
 
             self.editor.setText(script.code)
             self.current_script_name = name
+            self._load_script_properties(script)
+
+    def _on_script_hotkey_changed(self, name: str, hotkey: str):
+        """Reinstall all hotkeys when any script's hotkey changes."""
+        self._install_all_hotkeys()
+
+    # ------------------------------------------------------------------
+    # Hotkey installation
+    # ------------------------------------------------------------------
+
+    def _install_all_hotkeys(self):
+        """Clear and re-register all hotkeys (global + per-script)."""
+        self.hotkeys.clear_all()
+
+        # 1. Global toggle hotkey from config
+        config_manager = ConfigManager.get_instance()
+        hotkey_cfg = config_manager.config.get("hotkeys", {})
+        toggle_script_key = hotkey_cfg.get("toggle_script", "F10")
+        try:
+            self.hotkeys.register("toggle_script", toggle_script_key.lower(), self._toggle_script_signal.emit)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to register global hotkey '{toggle_script_key}':\n{e}")
+
+        # 2. Per-script hotkeys
+        if self.project_manager.is_project_open:
+            for script in self.project_manager.list_scripts():
+                if script.hotkey:
+                    try:
+                        self.hotkeys.register(
+                            f"script_{script.name}",
+                            script.hotkey.lower(),
+                            self._make_script_callback(script.name)
+                        )
+                    except Exception as e:
+                        QMessageBox.critical(
+                            self, "Error",
+                            f"Failed to register hotkey '{script.hotkey}' for script '{script.name}':\n{e}"
+                        )
+
+    def _make_script_callback(self, script_name: str):
+        """Create a callback that emits a signal to run a script on the main thread."""
+        def callback():
+            self._run_script_hotkey_signal.emit(script_name)
+        return callback
+
+    def _on_run_script_hotkey(self, script_name: str):
+        """Handle hotkey-triggered script execution on the main thread."""
+        if not script_name or not self.project_manager.is_project_open:
+            return
+        # Save current code first
+        self._save_current_code()
+        # Switch to the target script
+        self.project_manager.set_active_script(script_name)
+        # Run it
+        self.run_toggle()
 
     # ------------------------------------------------------------------
     # Config / Hotkeys
     # ------------------------------------------------------------------
 
     def on_config_applied(self, config):
-        hotkeys = config.get("hotkeys", {})
-        toggle_script_key = hotkeys.get("toggle_script", "F10")
-        try:
-            self.hotkeys.register("toggle_script", toggle_script_key.lower(), self.run_toggle)
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to register hotkey '{toggle_script_key}':\n{e}")
+        """Called when global config is applied. Reinstall all hotkeys."""
+        self._install_all_hotkeys()
 
     # ------------------------------------------------------------------
     # Run controls

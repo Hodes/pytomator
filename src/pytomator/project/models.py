@@ -12,6 +12,8 @@ class Script(BaseModel):
     code: str = Field(default="", description="Python code content")
     order: int = Field(default=0, description="Execution order index")
     is_active: bool = Field(default=False, description="Whether this script is currently selected in the editor")
+    hotkey: Optional[str] = Field(default=None, description="Hotkey to execute this script (e.g. 'ctrl+shift+f6')")
+    loop: bool = Field(default=False, description="Whether this script loops when executed")
 
     class Config:
         frozen = False  # Allow mutation at runtime

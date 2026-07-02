@@ -126,6 +126,48 @@ class ProjectManager(EventEmitter):
             self.emit("script_code_updated", name)
         return result
 
+    def update_script_hotkey(self, name: str, hotkey: Optional[str]) -> bool:
+        """Set or clear the hotkey for a script."""
+        if self.project is None:
+            return False
+        script = self.project.get_script(name)
+        if script is None:
+            return False
+        script.hotkey = hotkey
+        self.project.updated_at = type(self.project.updated_at).now()
+        self.emit("script_hotkey_changed", name, hotkey)
+        return True
+
+    def update_script_loop(self, name: str, loop: bool) -> bool:
+        """Set the loop state for a script."""
+        if self.project is None:
+            return False
+        script = self.project.get_script(name)
+        if script is None:
+            return False
+        script.loop = loop
+        self.project.updated_at = type(self.project.updated_at).now()
+        self.emit("script_loop_changed", name, loop)
+        return True
+
+    def validate_hotkey(self, hotkey: str, exclude_script: Optional[str] = None, exclude_global: bool = False) -> tuple[bool, str]:
+        """
+        Check if a hotkey conflicts with any other script's hotkey.
+        Returns (is_valid, conflict_message).
+        If exclude_script is provided, that script is ignored (for when we're updating it).
+        """
+        if self.project is None:
+            return True, ""
+
+        # Check against other project scripts
+        for script in self.project.scripts:
+            if script.name == exclude_script:
+                continue
+            if script.hotkey and script.hotkey.lower() == hotkey.lower():
+                return False, f"Hotkey '{hotkey}' is already assigned to script '{script.name}'."
+
+        return True, ""
+
     def get_script(self, name: str) -> Optional[Script]:
         """Get a script by name."""
         if self.project is None:
