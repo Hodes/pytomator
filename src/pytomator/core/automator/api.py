@@ -1,9 +1,14 @@
 import sys
 import time
+from typing import TYPE_CHECKING
+
 import pyautogui
 from pytomator.core.decorators import pytomator_api
 from pytomator.core.global_interruption_controller import should_stop
 from pytomator.core.script_interrupted import ScriptInterrupted
+
+if TYPE_CHECKING:
+    from pytomator.project.manager import ProjectManager
 
 ENTER = "enter"
 ESC = "esc"
@@ -11,6 +16,35 @@ ESC = "esc"
 use_direct_input_keys = sys.platform == "win32"
 if use_direct_input_keys:
     import pydirectinput
+
+# ── Registry for ProjectManager (set by MainWindow) ──
+_project_manager: "ProjectManager | None" = None
+_import_cache: dict[str, "_ScriptNamespace"] = {}
+
+
+class _ScriptNamespace:
+    """Wrapper around a script's execution namespace for import_script()."""
+
+    def __init__(self, ns: dict):
+        self._ns = ns
+
+    def __getattr__(self, name: str):
+        try:
+            return self._ns[name]
+        except KeyError:
+            raise AttributeError(f"Script has no attribute '{name}'")
+
+
+def set_project_manager(pm: "ProjectManager | None") -> None:
+    """Set the active ProjectManager instance (called by MainWindow at runtime)."""
+    global _project_manager
+    _project_manager = pm
+
+
+def reset_import_cache() -> None:
+    """Clear the import cache. Called before each script run cycle."""
+    global _import_cache
+    _import_cache = {}
 
 @pytomator_api(
     description="Enables or disables the use of pydirectinput for keys. Useful on Windows to avoid security blocks.",
@@ -195,3 +229,95 @@ def press(key):
 )
 def write(text, interval=0.05):
     pyautogui.write(text, interval=interval)
+
+
+# ═══════════════════════════════════════════════════════════════
+# Project script importing (available only when a project is open)
+# ═══════════════════════════════════════════════════════════════
+
+@pytomator_api(
+    description="Imports a script from the current project into the running script's namespace. "
+                "Results are cached for the current run cycle, so the script code is executed only once.",
+    params={
+        "name": "The name of the script to import (must exist in the current project).",
+        "merge": "If True, injects all definitions into the calling script's global scope (default False)."
+    },
+    returns="A namespace-like object with the script's top-level definitions accessible as attributes.",
+    category="Project",
+    examples=[
+        "utils = import_script('utils')        # Import as namespace",
+        "utils.login()                         # Call via namespace",
+        "import_script('vars', merge=True)     # Inject into global scope",
+        "soma(a, b)                            # Use directly after merge",
+    ],
+    version="1.0",
+)
+def import_script(name: str, merge: bool = False):
+    """Import a script from the current project (cached per run cycle)."""
+    global _import_cache
+
+    if name in _import_cache and not merge:
+        return _import_cache[name]
+
+    if _project_manager is None or not _project_manager.is_project_open:
+        raise NameError(f"No project is currently open — cannot import script '{name}'")
+
+    script = _project_manager.get_script(name)
+    if script is None:
+        raise NameError(f"Script '{name}' not found in the current project")
+
+    ns: dict = {}
+    exec(script.code, ns)
+    wrapper = _ScriptNamespace(ns)
+    _import_cache[name] = wrapper
+
+    # If merge=True, inject all definitions into the caller's global scope
+    if merge:
+        import sys
+        caller_globals = sys._getframe(1).f_globals
+        for key, value in ns.items():
+            if not key.startswith("_"):  # Skip private names
+                caller_globals[key] = value
+
+    return wrapper
+
+
+@pytomator_api(
+    description="Imports a script from the current project, forcing re-execution even if it was cached earlier.",
+    params={
+        "name": "The name of the script to reload (must exist in the current project).",
+        "merge": "If True, injects all definitions into the calling script's global scope (default False)."
+    },
+    returns="A namespace-like object with the script's top-level definitions accessible as attributes.",
+    category="Project",
+    examples=[
+        "utils = reload_script('utils')            # Re-import ignoring cache",
+        "reload_script('vars', merge=True)          # Re-import and inject",
+    ],
+    version="1.0",
+)
+def reload_script(name: str, merge: bool = False):
+    """Import a script from the current project, forcing a reload."""
+    global _import_cache
+
+    if _project_manager is None or not _project_manager.is_project_open:
+        raise NameError(f"No project is currently open — cannot reload script '{name}'")
+
+    script = _project_manager.get_script(name)
+    if script is None:
+        raise NameError(f"Script '{name}' not found in the current project")
+
+    ns: dict = {}
+    exec(script.code, ns)
+    wrapper = _ScriptNamespace(ns)
+    _import_cache[name] = wrapper  # Update cache
+
+    # If merge=True, inject all definitions into the caller's global scope
+    if merge:
+        import sys
+        caller_globals = sys._getframe(1).f_globals
+        for key, value in ns.items():
+            if not key.startswith("_"):
+                caller_globals[key] = value
+
+    return wrapper

@@ -1,0 +1,165 @@
+"""ProjectManager - coordinates project state, CRUD, and script management."""
+
+from pathlib import Path
+from typing import Optional
+
+from pytomator.core.events import EventEmitter
+from pytomator.project.models import Project, Script, ProjectSettings
+from pytomator.project.storage import ProjectStorage
+
+
+class ProjectManager(EventEmitter):
+    """
+    Central coordinator for project operations.
+
+    Emits:
+        "project_loaded"    - when a project is opened/created
+        "project_closed"    - when the project is closed
+        "project_saved"     - after saving to disk
+        "script_added"      - args: (script_name)
+        "script_removed"    - args: (script_name)
+        "script_renamed"    - args: (old_name, new_name)
+        "active_script_changed" - args: (script_name or None)
+        "script_code_updated"   - args: (script_name)
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.storage = ProjectStorage()
+        self.project: Optional[Project] = None
+        self._project_path: Optional[Path] = None
+
+    # ------------------------------------------------------------------
+    # Project lifecycle
+    # ------------------------------------------------------------------
+
+    def create_project(self, name: str, description: str = "") -> Project:
+        """Create and load a new empty project."""
+        self.project = self.storage.create_new(name, description)
+        self._project_path = None
+        self.emit("project_loaded")
+        return self.project
+
+    def load_project(self, path: Path) -> Project:
+        """Load a project from a .pytom file."""
+        self.project = self.storage.load(path)
+        self._project_path = self.storage.recent_path
+        self.emit("project_loaded")
+        return self.project
+
+    def save_project(self, path: Optional[Path] = None) -> bool:
+        """Save the current project. If path is None, uses the last path."""
+        if self.project is None:
+            return False
+
+        save_path = path or self._project_path
+        if save_path is None:
+            return False
+
+        self.storage.save(self.project, save_path)
+        self._project_path = self.storage.recent_path
+        self.emit("project_saved")
+        return True
+
+    def close_project(self):
+        """Close the current project (no save)."""
+        self.project = None
+        self._project_path = None
+        self.emit("project_closed")
+
+    @property
+    def project_path(self) -> Optional[Path]:
+        return self._project_path
+
+    @property
+    def is_project_open(self) -> bool:
+        return self.project is not None
+
+    # ------------------------------------------------------------------
+    # Script CRUD
+    # ------------------------------------------------------------------
+
+    def add_script(self, name: str, code: str = "") -> Optional[Script]:
+        """Add a new script to the current project."""
+        if self.project is None:
+            return None
+        try:
+            script = self.project.add_script(name, code)
+            self.emit("script_added", script.name)
+            return script
+        except ValueError:
+            return None
+
+    def remove_script(self, name: str) -> bool:
+        """Remove a script from the current project."""
+        if self.project is None:
+            return False
+        result = self.project.remove_script(name)
+        if result:
+            self.emit("script_removed", name)
+        return result
+
+    def rename_script(self, old_name: str, new_name: str) -> bool:
+        """Rename a script."""
+        if self.project is None:
+            return False
+        result = self.project.rename_script(old_name, new_name)
+        if result:
+            self.emit("script_renamed", old_name, new_name)
+        return result
+
+    def set_active_script(self, name: str) -> bool:
+        """Set which script is active (selected in the editor)."""
+        if self.project is None:
+            return False
+        result = self.project.set_active_script(name)
+        if result:
+            self.emit("active_script_changed", name)
+        return result
+
+    def update_script_code(self, name: str, code: str) -> bool:
+        """Update a script's code content."""
+        if self.project is None:
+            return False
+        result = self.project.update_script_code(name, code)
+        if result:
+            self.emit("script_code_updated", name)
+        return result
+
+    def get_script(self, name: str) -> Optional[Script]:
+        """Get a script by name."""
+        if self.project is None:
+            return None
+        return self.project.get_script(name)
+
+    def get_active_script(self) -> Optional[Script]:
+        """Get the currently active script."""
+        if self.project is None:
+            return None
+        return self.project.get_active_script()
+
+    def list_scripts(self) -> list[Script]:
+        """List all scripts in the current project."""
+        if self.project is None:
+            return []
+        return list(self.project.scripts)
+
+    # ------------------------------------------------------------------
+    # Settings helpers
+    # ------------------------------------------------------------------
+
+    def get_project_settings(self) -> Optional[ProjectSettings]:
+        if self.project is None:
+            return None
+        return self.project.settings
+
+    def update_project_settings(self, **kwargs):
+        """Update project settings fields."""
+        if self.project is None:
+            return
+        for key, value in kwargs.items():
+            if hasattr(self.project.settings, key):
+                setattr(self.project.settings, key, value)
+        self.project.updated_at = type(self.project.updated_at).now()
+        self.emit("project_updated")
+

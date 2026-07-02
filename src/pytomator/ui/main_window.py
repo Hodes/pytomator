@@ -1,3 +1,7 @@
+"""Main window - orchestrates project management, script editing, and settings."""
+
+from pathlib import Path
+
 from PyQt6.QtWidgets import (
     QMainWindow, QTabWidget, QLabel
 )
@@ -7,11 +11,15 @@ import qtawesome as qta
 
 from pytomator.ui.about_frame import AboutFrame
 from pytomator.ui.editor_frame import EditorFrame
+from pytomator.ui.project_frame import ProjectFrame
 from pytomator.core.script_runner import ScriptRunner
 from pytomator.ui.settings_frame import SettingsFrame
+from pytomator.project.manager import ProjectManager
+from pytomator.core.automator import api as automator_api
+
 
 APP_STATES = {
-    "stopped":{
+    "stopped": {
         "title": "Stopped",
         "icon": "fa6.circle-stop",
         "color": QColor("#f84545"),
@@ -29,11 +37,12 @@ APP_STATES = {
     }
 }
 
+
 class MainWindow(QMainWindow):
-    
+
     # Signals
     stateChanged = pyqtSignal(str)
-    
+
     def __init__(self):
         super().__init__()
 
@@ -42,22 +51,42 @@ class MainWindow(QMainWindow):
         # Window size
         self.resize(600, 800)
 
+        # ── Core services ──────────────────────────────────
+        self.project_manager = ProjectManager()
         self.script_runner = ScriptRunner()
+
+        # Register the project manager with the automator API so import_script works
+        automator_api.set_project_manager(self.project_manager)
+
         self.script_runner.on("started", lambda: self.on_runner_state_change(True))
         self.script_runner.on("finished", lambda: self.on_runner_state_change(False))
         self.script_runner.on("interrupted", lambda: self.on_runner_state_change(False))
-    
-        # Tabs for different views
-        tabs = QTabWidget()
-        tabs.addTab(EditorFrame(self.script_runner), "Script Editor")
-        tabs.addTab(SettingsFrame(), "Settings")
-        tabs.addTab(AboutFrame(), "About")  # Placeholder for AboutFrame
-        # Tab icons
-        tabs.setTabIcon(0, qta.icon("fa6s.code"))
-        tabs.setTabIcon(1, qta.icon("fa5s.cog"))
-        tabs.setTabIcon(2, qta.icon("mdi.help-circle"))
 
-        # Status bar
+        # ── Tabs ───────────────────────────────────────────
+        self.tabs = QTabWidget()
+
+        # Tab 0: Project
+        self.project_frame = ProjectFrame(self.project_manager)
+        self.project_frame.project_opened.connect(self._on_project_opened)
+        self.project_frame.project_closed.connect(self._on_project_closed)
+        self.tabs.addTab(self.project_frame, "Project")
+        self.tabs.setTabIcon(0, qta.icon("fa6s.folder"))
+
+        # Tab 1: Editor
+        self.editor_frame = EditorFrame(self.script_runner, self.project_manager)
+        self.tabs.addTab(self.editor_frame, "Script Editor")
+        self.tabs.setTabIcon(1, qta.icon("fa6s.code"))
+
+        # Tab 2: Settings
+        self.settings_frame = SettingsFrame(self.project_manager)
+        self.tabs.addTab(self.settings_frame, "Settings")
+        self.tabs.setTabIcon(2, qta.icon("fa5s.cog"))
+
+        # Tab 3: About
+        self.tabs.addTab(AboutFrame(), "About")
+        self.tabs.setTabIcon(3, qta.icon("mdi.help-circle"))
+
+        # ── Status bar ─────────────────────────────────────
         self._current_icon = None
         self._current_color = None
         self._icon_anim_timer = QTimer(self)
@@ -70,18 +99,54 @@ class MainWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.status_indicator)
         self.stateChanged.connect(self._state_changed)
         self.set_state('stopped')
-        
-        self.setCentralWidget(tabs)
+
+        self.setCentralWidget(self.tabs)
+
+        # ── Project indicator in status bar ────────────────
+        self.project_label = QLabel("No project")
+        self.project_label.setContentsMargins(6, 0, 6, 0)
+        self.statusBar().addPermanentWidget(self.project_label)
+
+        self.project_manager.on("project_loaded", self._update_project_status)
+        self.project_manager.on("project_closed", self._update_project_status)
+        self.project_manager.on("project_saved", self._update_project_status)
+        self._update_project_status()
+
+    # ------------------------------------------------------------------
+    # Project lifecycle
+    # ------------------------------------------------------------------
+
+    def _on_project_opened(self):
+        """When a project is opened, switch to the editor tab."""
+        self.tabs.setCurrentIndex(1)  # Editor tab
+
+    def _on_project_closed(self):
+        """When a project is closed, switch back to the project tab."""
+        self.tabs.setCurrentIndex(0)  # Project tab
+
+    def _update_project_status(self):
+        """Update the project label in the status bar."""
+        if self.project_manager.is_project_open:
+            name = self.project_manager.project.name if self.project_manager.project else "project"
+            path = self.project_manager.project_path
+            short_path = str(path) if path else "(unsaved)"
+            self.project_label.setText(f"Project: {name} [{short_path}]")
+        else:
+            self.project_label.setText("No project")
+
+    # ------------------------------------------------------------------
+    # Runner state
+    # ------------------------------------------------------------------
 
     def on_runner_state_change(self, is_running: bool):
         if is_running:
             self.set_state('running')
         else:
             self.set_state('stopped')
-    
+
     def set_state(self, state: str):
         self.stateChanged.emit(state)
-    
+
     def _update_status_icon(self):
         if not self._current_icon:
             return
@@ -92,12 +157,12 @@ class MainWindow(QMainWindow):
             animation=self._current_animation
         )
         self.status_indicator.setPixmap(icon.pixmap(24, 24))
-    
+
     def _state_changed(self, state: str):
         current_state = APP_STATES[state]
         bgcolor = current_state.get('bgcolor')
         border = current_state.get('border')
-        
+
         self._current_icon = current_state['icon']
         self._current_color = current_state['color']
 
@@ -109,7 +174,7 @@ class MainWindow(QMainWindow):
         else:
             self._current_animation = None
             self._icon_anim_timer.stop()
-        
+
         style = f"""
             QStatusBar {{
                 background-color: {bgcolor};
@@ -118,8 +183,8 @@ class MainWindow(QMainWindow):
             }}
         """
         icon = qta.icon(
-            self._current_icon, 
-            color=self._current_color, 
+            self._current_icon,
+            color=self._current_color,
             animation=self._current_animation
         )
         title = f"Script execution is: {current_state.get('title')}"
@@ -129,8 +194,7 @@ class MainWindow(QMainWindow):
             self.statusBar().setStyleSheet(style)
             self._last_style = style
         self.statusBar().showMessage(title)
-        
-    
+
     def closeEvent(self, event):
         if self.script_runner.is_running():
             self.script_runner.stop()

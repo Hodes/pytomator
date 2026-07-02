@@ -5,6 +5,7 @@ from typing import Callable
 
 from pytomator.core.events import EventEmitter
 from pytomator.core.automator import api as automator_api
+from pytomator.core.automator.api import reset_import_cache
 from pytomator.core.script_interrupted import ScriptInterrupted
 from pytomator.core.global_interruption_controller import GlobalInterruptionController, should_stop
 
@@ -18,7 +19,11 @@ class ScriptRunner(EventEmitter):
         self._script_frame = None
         self._code = ""
 
-        self.script_globals = {
+        self.script_globals = self._build_globals()
+
+    def _build_globals(self):
+        """Build the script globals dict from the automator API + builtins."""
+        return {
             "__builtins__": __builtins__,
             "should_stop": should_stop,
             **self._filtered_automator_api()
@@ -52,6 +57,8 @@ class ScriptRunner(EventEmitter):
         
         self.stop()
         GlobalInterruptionController.clear_global_interruption()
+        # Reset the import cache so scripts are re-executed on this run
+        reset_import_cache()
         self._running = True
 
         self.runner_thread = threading.Thread(
