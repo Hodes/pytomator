@@ -1,3 +1,21 @@
+Metadata-Version: 2.4
+Name: pytomator
+Version: 0.1.2
+Summary: Python scripted automation tool
+Author: Henrique Otavio
+Requires-Python: <3.15,>=3.12
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pyqt6<7,>=6.10.2
+Requires-Dist: pyqt6-qscintilla<3,>=2.14.1
+Requires-Dist: pyautogui<1,>=0.9
+Requires-Dist: pydirectinput<2,>=1.0
+Requires-Dist: keyboard<1,>=0.13
+Requires-Dist: mss<11,>=10.0
+Requires-Dist: pillow<13,>=12.0
+Requires-Dist: qtawesome<2,>=1.4.0
+Dynamic: license-file
+
 # Hodes Pytomator
 
 A Python application to run automations

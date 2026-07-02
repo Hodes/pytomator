@@ -10,7 +10,7 @@ INIT_FILE = ROOT / "src" / "pytomator" / "__init__.py"
 def main():
     with PYPROJECT.open("rb") as f:
       data = tomllib.load(f)
-    version = data["tool"]["poetry"]["version"]
+    version = data["project"]["version"]
     major, minor, patch = version.split(".")
     
     update_version_info(version, major, minor, patch)
@@ -53,7 +53,7 @@ VSVersionInfo(
     out = ROOT / "tools" / "version_info.txt"
     out.write_text(content, encoding="utf-8")
     
-    print(f"✅ Version info generated ({version})")
+    print(f"Version info generated ({version})")
     
 def update_app_version(version):
   content = f'''# Auto-generated
@@ -63,7 +63,7 @@ __version__ = "{version}"
 '''
   INIT_FILE.parent.mkdir(parents=True, exist_ok=True)
   INIT_FILE.write_text(content, encoding="utf-8")
-  print(f"✅ Updated __init__.py with version {version}")
+  print(f"Updated __init__.py with version {version}")
   
 if __name__ == "__main__":
     main()

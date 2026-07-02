@@ -22,7 +22,7 @@ elif so == "Linux":
 else:
     os_name = "unknown"
 
-version = pyproject["tool"]["poetry"]["version"]
+version = pyproject["project"]["version"]
 exe_name = f"Pytomator-{version}-{os_name}-{arch}"
 
 

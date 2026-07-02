@@ -1,0 +1,5 @@
+[console_scripts]
+build = tools.build:main
+build-resources = tools.build_resources:main
+gen-version = tools.generate_version_info:main
+pytomator = pytomator.app:main
