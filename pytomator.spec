@@ -49,7 +49,7 @@ exe = EXE(
     [],
     name=exe_name,
     icon='assets/app.ico',
-    version='assets/version_info.txt',
+    version='tools/version_info.txt',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

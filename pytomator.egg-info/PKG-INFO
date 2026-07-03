@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: pytomator
-Version: 0.1.2
+Version: 0.2.0
 Summary: Python scripted automation tool
 Author: Henrique Otavio
 Requires-Python: <3.15,>=3.12

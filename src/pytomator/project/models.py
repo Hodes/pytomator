@@ -40,7 +40,7 @@ class Project(BaseModel):
     """Root model representing a complete .pytom project."""
 
     # Metadata
-    pytomator_version: str = Field(default="0.1.2", description="Pytomator version that created this project")
+    pytomator_version: str = Field(default="0.2.0", description="Pytomator version that created this project")
     name: str = Field(..., description="Project name")
     version: str = Field(default="1.0.0", description="Project version")
     created_at: datetime = Field(default_factory=datetime.now, description="Creation timestamp")

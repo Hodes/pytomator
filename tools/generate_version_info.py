@@ -1,4 +1,5 @@
 from pathlib import Path
+from datetime import datetime
 import tomllib
 
 ROOT = Path.cwd()
@@ -6,6 +7,7 @@ ROOT = Path.cwd()
 # ROOT = Path(__file__).resolve().parent
 PYPROJECT = ROOT / "pyproject.toml"
 INIT_FILE = ROOT / "src" / "pytomator" / "__init__.py"
+BUILD_INFO_FILE = ROOT / "src" / "pytomator" / "build_info.py"
 
 def main():
     with PYPROJECT.open("rb") as f:
@@ -15,6 +17,7 @@ def main():
     
     update_version_info(version, major, minor, patch)
     update_app_version(version)
+    update_build_info(datetime.now().astimezone())
   
 def update_version_info(version, major, minor, patch):
     content = f"""
@@ -64,6 +67,16 @@ __version__ = "{version}"
   INIT_FILE.parent.mkdir(parents=True, exist_ok=True)
   INIT_FILE.write_text(content, encoding="utf-8")
   print(f"Updated __init__.py with version {version}")
+
+def update_build_info(build_datetime):
+  content = f'''# Auto-generated
+# Do not edit manually
+
+BUILD_DATETIME = "{build_datetime.isoformat(timespec="seconds")}"
+BUILD_YEAR = {build_datetime.year}
+'''
+  BUILD_INFO_FILE.write_text(content, encoding="utf-8")
+  print(f"Updated build info ({build_datetime.isoformat(timespec='seconds')})")
   
 if __name__ == "__main__":
     main()
