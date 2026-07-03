@@ -11,6 +11,7 @@ from PyQt6.QtCore import pyqtSignal
 import qtawesome as qta
 
 from pytomator.project.manager import ProjectManager
+from pytomator.config.config_manager import ConfigManager
 
 
 class ProjectFrame(QWidget):
@@ -22,6 +23,7 @@ class ProjectFrame(QWidget):
     def __init__(self, project_manager: ProjectManager):
         super().__init__()
         self.project_manager = project_manager
+        self.config_manager = ConfigManager.get_instance()
 
         # Listen to manager events to update UI
         self.project_manager.on("project_loaded", self._on_project_loaded)
@@ -30,6 +32,37 @@ class ProjectFrame(QWidget):
 
         self._build_ui()
         self._update_ui_state()
+
+    # ------------------------------------------------------------------
+    # Utilities
+    # ------------------------------------------------------------------
+
+    def _get_last_dir(self) -> str:
+        """Return the last project directory stored in config, or empty string."""
+        return self.config_manager.config.get("last_project_dir", "")
+
+    def _save_last_dir(self, path: Path) -> None:
+        """Persist the directory of the given path to config."""
+        directory = str(path.parent)
+        self.config_manager.config["last_project_dir"] = directory
+        self.config_manager.save_config(self.config_manager.config)
+
+    def _open_project_file(self, start_dir: str) -> None:
+        """Open file dialog and load the selected project."""
+        path_str, _ = QFileDialog.getOpenFileName(
+            self, "Open Project", start_dir,
+            "Pytomator Project (*.pytom);;All Files (*)"
+        )
+        if not path_str:
+            return
+        path = Path(path_str)
+        try:
+            self.project_manager.load_project(path)
+            self._save_last_dir(path)
+            self._update_ui_state()
+            self.project_opened.emit()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to open project:\n{e}")
 
     # ------------------------------------------------------------------
     # UI Build
@@ -78,6 +111,23 @@ class ProjectFrame(QWidget):
         actions_layout.addLayout(row2)
 
         layout.addWidget(actions_group)
+
+        # ── Last project quick open ─────────────────────────────
+        self.last_project_group = QGroupBox("Last Project")
+        last_project_layout = QHBoxLayout()
+        self.last_project_group.setLayout(last_project_layout)
+
+        self.last_project_label = QLabel("No recent project")
+        self.last_project_label.setStyleSheet("color: #888;")
+        last_project_layout.addWidget(self.last_project_label, 1)
+
+        self.reopen_btn = QPushButton("Reopen")
+        self.reopen_btn.setIcon(qta.icon("fa6s.rotate-left"))
+        self.reopen_btn.clicked.connect(self._on_reopen_last)
+        self.reopen_btn.setEnabled(False)
+        last_project_layout.addWidget(self.reopen_btn)
+
+        layout.addWidget(self.last_project_group)
 
         # ── Project info group (hidden when no project) ─────────
         self.info_group = QGroupBox("Project Information")
@@ -128,6 +178,15 @@ class ProjectFrame(QWidget):
             self.description_edit.clear()
             self.status_label.setText("No project open")
 
+        # Update last project section
+        last_dir = self._get_last_dir()
+        if last_dir:
+            self.last_project_label.setText(str(Path(last_dir).resolve()))
+            self.reopen_btn.setEnabled(True)
+        else:
+            self.last_project_label.setText("No recent project")
+            self.reopen_btn.setEnabled(False)
+
     # ------------------------------------------------------------------
     # Slots
     # ------------------------------------------------------------------
@@ -148,19 +207,15 @@ class ProjectFrame(QWidget):
         self.project_opened.emit()
 
     def _on_open_project(self):
-        path_str, _ = QFileDialog.getOpenFileName(
-            self, "Open Project", "",
-            "Pytomator Project (*.pytom);;All Files (*)"
-        )
-        if not path_str:
+        start_dir = self._get_last_dir()
+        self._open_project_file(start_dir)
+
+    def _on_reopen_last(self):
+        """Quickly reopen the last project from the stored directory."""
+        last_dir = self._get_last_dir()
+        if not last_dir:
             return
-        path = Path(path_str)
-        try:
-            self.project_manager.load_project(path)
-            self._update_ui_state()
-            self.project_opened.emit()
-        except Exception as e:
-            QMessageBox.critical(self, "Error", f"Failed to open project:\n{e}")
+        self._open_project_file(last_dir)
 
     def _on_save(self):
         # Sync name/description from UI to model before saving
@@ -170,12 +225,17 @@ class ProjectFrame(QWidget):
             # No path yet → do Save As
             self._on_save_as()
         else:
+            # After saving, persist the directory
+            path = self.project_manager.project_path
+            if path:
+                self._save_last_dir(path)
             self._update_ui_state()
 
     def _on_save_as(self):
         self._sync_metadata()
+        start_dir = self._get_last_dir()
         path_str, _ = QFileDialog.getSaveFileName(
-            self, "Save Project As", "",
+            self, "Save Project As", start_dir,
             "Pytomator Project (*.pytom);;All Files (*)"
         )
         if not path_str:
@@ -184,6 +244,8 @@ class ProjectFrame(QWidget):
         success = self.project_manager.save_project(path)
         if not success:
             QMessageBox.critical(self, "Error", "Failed to save project.")
+        else:
+            self._save_last_dir(path)
         self._update_ui_state()
 
     def _on_close(self):

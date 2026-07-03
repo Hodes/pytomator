@@ -5,8 +5,8 @@ from pathlib import Path
 from PyQt6.QtWidgets import (
     QMainWindow, QTabWidget, QLabel
 )
-from PyQt6.QtGui import QIcon, QColor
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtGui import QIcon, QColor, QGuiApplication
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer, QSettings
 import qtawesome as qta
 
 from pytomator.ui.about_frame import AboutFrame
@@ -50,8 +50,9 @@ class MainWindow(QMainWindow):
 
         self.setWindowTitle("Hodes Pytomator")
         self.setWindowIcon(QIcon(":/icons/app_64.png"))
-        # Window size
-        self.resize(600, 800)
+        # Window size (default, may be overridden by saved geometry)
+        self.resize(800, 600)
+        self._restore_window_geometry()
 
         # ── Core services ──────────────────────────────────
         self.project_manager = ProjectManager()
@@ -204,7 +205,58 @@ class MainWindow(QMainWindow):
             self._last_style = style
         self.statusBar().showMessage(title)
 
+    # ------------------------------------------------------------------
+    # Window geometry persistence
+    # ------------------------------------------------------------------
+
+    def _save_window_geometry(self):
+        """Salva posição, tamanho e estado da janela via QSettings."""
+        settings = QSettings("Hodes", "Pytomator")
+        settings.setValue("window/geometry", self.saveGeometry())
+        settings.setValue("window/state", self.saveState())
+        settings.setValue("window/maximized", self.isMaximized())
+        if not self.isMaximized():
+            settings.setValue("window/position", self.pos())
+            settings.setValue("window/size", self.size())
+
+    def _restore_window_geometry(self):
+        """Restaura geometria da janela, validando se está visível na tela."""
+        settings = QSettings("Hodes", "Pytomator")
+
+        geometry = settings.value("window/geometry")
+        maximized = settings.value("window/maximized", False, type=bool)
+
+        if geometry is not None:
+            self.restoreGeometry(geometry)
+
+            # Validar se a janela está visível em pelo menos um monitor
+            screen = QGuiApplication.primaryScreen()
+            if screen:
+                screen_geometry = screen.availableGeometry()
+                window_geometry = self.frameGeometry()
+
+                # Se a janela estiver completamente fora da tela, resetar
+                if not screen_geometry.intersects(window_geometry):
+                    self.resize(600, 800)
+                    self._center_on_screen()
+
+            if maximized:
+                self.showMaximized()
+        else:
+            # Primeira execução: centralizar na tela
+            self._center_on_screen()
+
+    def _center_on_screen(self):
+        """Centraliza a janela na tela primária."""
+        screen = QGuiApplication.primaryScreen()
+        if screen:
+            screen_geometry = screen.availableGeometry()
+            x = (screen_geometry.width() - self.width()) // 2
+            y = (screen_geometry.height() - self.height()) // 2
+            self.move(x, y)
+
     def closeEvent(self, event):
+        self._save_window_geometry()
         if self.script_runner.is_running():
             self.script_runner.stop()
         event.accept()
