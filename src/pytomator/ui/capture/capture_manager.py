@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional
 
 from PyQt6.QtWidgets import QApplication, QMainWindow, QWidget, QDialog
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QPixmap, QCursor
 from PyQt6.QtCore import QObject, pyqtSignal
 from PIL import Image
 
@@ -48,16 +48,27 @@ class CaptureManager(QObject):
         self._show_overlay()
 
     def _show_overlay(self):
-        """Show the full-screen capture overlay on the primary monitor."""
+        """Show the full-screen capture overlay on the monitor where the cursor is."""
         # Minimize main window so user can see the screen
         if self._main_window:
             self._main_window.showMinimized()
 
-        # Create overlay and show fullscreen on primary monitor
+        # Create overlay
         self._overlay = CaptureOverlay()
         self._overlay.region_selected.connect(self._on_region_selected)
         self._overlay.cancelled.connect(self._on_capture_cancelled)
-        self._overlay.showFullScreen()
+
+        # Determine which monitor the cursor is on
+        cursor_pos = QCursor.pos()
+        screens = QApplication.screens()
+        target_screen = 0  # fallback to primary
+        for i, screen in enumerate(screens):
+            if screen.geometry().contains(cursor_pos):
+                target_screen = i
+                break
+
+        # Show overlay on the cursor's monitor
+        self._overlay.show_on_screen(target_screen)
 
     def _on_region_selected(self, x: int, y: int, w: int, h: int):
         """Called when the user selects a region on the overlay."""

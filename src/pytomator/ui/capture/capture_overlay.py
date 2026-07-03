@@ -1,8 +1,9 @@
 """Full-screen transparent overlay for selecting a screen region to capture.
 
-Shows on the primary monitor using showFullScreen().
 Template matching via MSS works on all monitors regardless.
 """
+
+import keyboard
 
 from PyQt6.QtWidgets import QWidget, QApplication, QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, QDoubleSpinBox, QFormLayout, QGroupBox, QDialogButtonBox
 from PyQt6.QtGui import QPainter, QPen, QColor, QPixmap, QFont
@@ -15,8 +16,7 @@ from pytomator.core.vision.capture_tool import (
 
 class CaptureOverlay(QWidget):
     """Full-screen semi-transparent overlay for region selection.
-
-    Shows on the primary monitor via showFullScreen().
+    Uses showNormal() positioned exactly over the target monitor.
     """
 
     region_selected = pyqtSignal(int, int, int, int)  # x, y, w, h (absolute virtual coords)
@@ -53,11 +53,55 @@ class CaptureOverlay(QWidget):
         self._is_dragging = False
         self._current_rect: QRect | None = None
         self._background_pixmap = None
+        self._esc_handler_id = None
 
         self._capture_background()
 
-    def _capture_background(self):
-        """Capture the primary screen to use as background."""
+    def _on_esc_hotkey(self):
+        """Called when ESC is pressed globally."""
+        self.cancelled.emit()
+
+    def show_on_screen(self, screen_index: int):
+        """Move the overlay to a specific physical monitor.
+
+        Args:
+            screen_index: Index of the screen (0 = primary, 1, 2, ...).
+        """
+        screens = QApplication.screens()
+        if screen_index < 0 or screen_index >= len(screens):
+            return
+
+        target = screens[screen_index]
+        geometry = target.geometry()
+
+        self._screen_width = geometry.width()
+        self._screen_height = geometry.height()
+        self._virtual_left = geometry.x()
+        self._virtual_top = geometry.y()
+
+        self.setGeometry(geometry)
+        self._capture_background(screen_index)
+        self.showNormal()
+        self.activateWindow()
+        self.setFocus()
+        self.update()
+
+        # Register global ESC hotkey (works even without focus)
+        self._esc_handler_id = keyboard.add_hotkey("esc", self._on_esc_hotkey)
+
+    def _capture_background(self, screen_index: int = -1):
+        """Capture the current monitor screen to use as background.
+
+        Args:
+            screen_index: Monitor index to capture (-1 = primary).
+        """
+        if screen_index >= 0:
+            screens = QApplication.screens()
+            if screen_index < len(screens):
+                target = screens[screen_index]
+                self._background_pixmap = target.grabWindow(0)
+                return
+        # Fallback: primary screen
         screen = QApplication.primaryScreen()
         if screen:
             self._background_pixmap = screen.grabWindow(0)
@@ -129,6 +173,9 @@ class CaptureOverlay(QWidget):
             self.cancelled.emit()
 
     def closeEvent(self, event):
+        if self._esc_handler_id is not None:
+            keyboard.remove_hotkey(self._esc_handler_id)
+            self._esc_handler_id = None
         super().closeEvent(event)
 
 
