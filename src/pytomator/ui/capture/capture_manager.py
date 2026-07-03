@@ -46,8 +46,11 @@ class CaptureManager(QObject):
 
     def start_capture(self):
         """Start the capture workflow: show overlay, capture region, preview, save."""
-        if not self._project_manager.is_project_open:
-            # Can't capture without a project
+        if (
+            not self._project_manager.is_project_open
+            or self._project_manager.project_path is None
+        ):
+            # Templates need a project directory in which to store their images.
             return
 
         self.cancel_capture(emit_signal=False)

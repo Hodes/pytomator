@@ -1,6 +1,8 @@
 import threading
 import time
 import sys
+import logging
+import traceback
 from typing import Callable
 
 from pytomator.core.events import EventEmitter
@@ -133,7 +135,10 @@ class ScriptRunner(EventEmitter):
                     self.emit("interrupted")
                     break
                 except Exception as e:
-                    self.emit("error", str(e))
+                    logging.getLogger(__name__).exception("Automation script failed")
+                    self.emit("error", "".join(
+                        traceback.format_exception_only(type(e), e)
+                    ).strip())
                     break
                 finally:
                     self._last_lineno = None
@@ -149,7 +154,10 @@ class ScriptRunner(EventEmitter):
         except ScriptInterrupted:
             self.emit("interrupted")
         except Exception as e:
-            self.emit("error", e)
+            logging.getLogger(__name__).exception("Script runner failed")
+            self.emit("error", "".join(
+                traceback.format_exception_only(type(e), e)
+            ).strip())
         finally:
             sys.settrace(None)
             self._running = False

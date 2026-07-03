@@ -20,6 +20,8 @@ from pytomator.project.manager import ProjectManager
 class EditorFrame(QWidget):
 
     script_error_signal = pyqtSignal(str)
+    runner_state_signal = pyqtSignal(bool)
+    line_executing_signal = pyqtSignal(int)
     _run_script_hotkey_signal = pyqtSignal(str)  # Emitted from hotkey thread, handled on main thread
     _toggle_script_signal = pyqtSignal()          # Thread-safe toggle for global hotkey
     _capture_region_signal = pyqtSignal()         # Thread-safe trigger for capture region hotkey
@@ -110,11 +112,15 @@ class EditorFrame(QWidget):
         # ── Runner ──────────────────────────────────────────────
         self.runner = script_runner
 
-        self.runner.on("started", lambda: self.on_runner_state_change(True))
-        self.runner.on("finished", lambda: self.on_runner_state_change(False))
-        self.runner.on("interrupted", lambda: self.on_runner_state_change(False))
-        self.runner.on("line_executing", self.editor.highlight_line)
+        # ScriptRunner emits from its worker thread. Qt signals queue these UI
+        # updates safely onto the GUI thread.
+        self.runner.on("started", lambda: self.runner_state_signal.emit(True))
+        self.runner.on("finished", lambda: self.runner_state_signal.emit(False))
+        self.runner.on("interrupted", lambda: self.runner_state_signal.emit(False))
+        self.runner.on("line_executing", self.line_executing_signal.emit)
         self.runner.on("error", self.update_script_error)
+        self.runner_state_signal.connect(self.on_runner_state_change)
+        self.line_executing_signal.connect(self.editor.highlight_line)
 
         self.update_run_button(False)
         self.run_button.clicked.connect(self.run_toggle)

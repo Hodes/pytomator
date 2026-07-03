@@ -19,7 +19,10 @@ class CaptureCancellationTests(unittest.TestCase):
         cls.app = QApplication.instance() or QApplication([])
 
     def setUp(self):
-        project_manager = SimpleNamespace(is_project_open=True)
+        project_manager = SimpleNamespace(
+            is_project_open=True,
+            project_path=object(),
+        )
         self.manager = CaptureManager(project_manager)
         self.main_window = MagicMock()
         self.manager.set_main_window(self.main_window)
@@ -54,6 +57,15 @@ class CaptureCancellationTests(unittest.TestCase):
         stale_overlay.close.assert_called_once_with()
         self.assertTrue(self.manager._capture_active)
         show_overlay.assert_called_once_with()
+
+    def test_start_capture_is_ignored_for_unsaved_project(self):
+        self.manager._project_manager.project_path = None
+
+        with patch.object(self.manager, "_show_overlay") as show_overlay:
+            self.manager.start_capture()
+
+        self.assertFalse(self.manager._capture_active)
+        show_overlay.assert_not_called()
 
     def test_escape_in_preview_requests_global_cancellation(self):
         dialog = CapturePreviewDialog(

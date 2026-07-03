@@ -36,6 +36,7 @@ class TemplatesFrame(QWidget):
         # Connect signals
         self._project_manager.on("project_loaded", self._on_project_changed)
         self._project_manager.on("project_closed", self._on_project_changed)
+        self._project_manager.on("project_saved", self._update_capture_button_state)
         self._capture_manager.template_saved.connect(self._on_template_saved)
 
         # Listen for config changes to update hotkey label
