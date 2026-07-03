@@ -86,6 +86,7 @@ def get_active_window_info() -> dict:
         On non-Windows platforms, returns empty data.
     """
     result = {
+        "id": None,
         "title": None,
         "left": 0,
         "top": 0,
@@ -100,6 +101,7 @@ def get_active_window_info() -> dict:
 
             hwnd = win32gui.GetForegroundWindow()
             if hwnd:
+                result["id"] = hwnd
                 result["title"] = win32gui.GetWindowText(hwnd)
                 # Get window rect (including title bar and borders)
                 rect = win32gui.GetWindowRect(hwnd)
@@ -113,6 +115,61 @@ def get_active_window_info() -> dict:
             pass  # Silently fail on any win32 error
 
     return result
+
+
+def get_monitor_at_point(x: int, y: int) -> dict:
+    """Return the physical monitor containing a point, or the nearest monitor."""
+    monitors = get_physical_monitors()
+    for monitor in monitors:
+        if (
+            monitor["left"] <= x < monitor["left"] + monitor["width"]
+            and monitor["top"] <= y < monitor["top"] + monitor["height"]
+        ):
+            return monitor
+
+    if not monitors:
+        left, top, width, height = get_screen_size()
+        return {"left": left, "top": top, "width": width, "height": height}
+
+    return min(
+        monitors,
+        key=lambda monitor: (
+            x - (monitor["left"] + monitor["width"] // 2)
+        ) ** 2
+        + (
+            y - (monitor["top"] + monitor["height"] // 2)
+        ) ** 2,
+    )
+
+
+def get_active_search_region(
+    window_info: Optional[dict] = None,
+) -> tuple[dict, dict]:
+    """Return the visible active-window region and its focus snapshot."""
+    window = window_info or get_active_window_info()
+    v_left, v_top, v_width, v_height = get_screen_size()
+    v_right = v_left + v_width
+    v_bottom = v_top + v_height
+
+    if window["width"] > 0 and window["height"] > 0:
+        left = max(window["left"], v_left)
+        top = max(window["top"], v_top)
+        right = min(window["left"] + window["width"], v_right)
+        bottom = min(window["top"] + window["height"], v_bottom)
+        if right > left and bottom > top:
+            return (
+                {"left": left, "top": top, "width": right - left, "height": bottom - top},
+                window,
+            )
+        point_x = window["left"] + window["width"] // 2
+        point_y = window["top"] + window["height"] // 2
+    else:
+        import pyautogui
+
+        cursor = pyautogui.position()
+        point_x, point_y = cursor.x, cursor.y
+
+    return get_monitor_at_point(point_x, point_y), window
 
 
 def _get_project_dir(project_path: Path) -> Path:

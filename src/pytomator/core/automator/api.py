@@ -75,6 +75,11 @@ def _get_project_path() -> Path:
     return path
 
 
+def _vision_debug_enabled() -> bool:
+    project = _project_manager.project if _project_manager is not None else None
+    return bool(project and project.settings.vision_debug)
+
+
 @pytomator_api(
     description="Finds a template on the screen by name and returns its bounding box (x, y, w, h). "
                 "Returns None if the template is not found.",
@@ -94,9 +99,19 @@ def _get_project_path() -> Path:
 def find_template(name: str, confidence: Optional[float] = None):
     """Find a template on the screen and return its bounding box."""
     from pytomator.core.vision.template_matcher import find_on_screen
+    from pytomator.core.vision.capture_tool import get_active_search_region
+
     template = _get_template(name)
     project_path = _get_project_path()
-    result = find_on_screen(template, project_path, confidence)
+    search_region, window_snapshot = get_active_search_region()
+    result = find_on_screen(
+        template,
+        project_path,
+        confidence,
+        search_region=search_region,
+        debug=_vision_debug_enabled(),
+        window_info=window_snapshot,
+    )
     return result
 
 
@@ -130,12 +145,12 @@ def _resolve_position(
         "center": (cx, cy),
         "top_left": (x, y),
         "top_center": (cx, y),
-        "top_right": (x + w, y),
+        "top_right": (x + w - 1, y),
         "left_center": (x, cy),
-        "right_center": (x + w, cy),
-        "bottom_left": (x, y + h),
-        "bottom_center": (cx, y + h),
-        "bottom_right": (x + w, y + h),
+        "right_center": (x + w - 1, cy),
+        "bottom_left": (x, y + h - 1),
+        "bottom_center": (cx, y + h - 1),
+        "bottom_right": (x + w - 1, y + h - 1),
     }.get(pos, (cx, cy))
 
 
@@ -149,6 +164,7 @@ def _resolve_position(
                     "'top_right', 'bottom_left', 'bottom_right', 'top_center', 'bottom_center', "
                     "'left_center', 'right_center', or a tuple (dx, dy) for a custom pixel offset "
                     "from the top-left corner. Default is 'center'.",
+        "backend": "Mouse backend: 'standard' (PyAutoGUI) or 'directinput' (Windows only).",
     },
     category="Vision",
     returns="True if the template was found and clicked, False otherwise.",
@@ -158,6 +174,7 @@ def _resolve_position(
         "click_template('btn_ok', position='bottom_right')",
         "click_template('checkbox', position=(5, 5))",
         "click_template('slider', position='left_center')",
+        "click_template('play', backend='directinput')  # Windows games/DirectX",
     ],
     version="1.0",
 )
@@ -166,16 +183,51 @@ def click_template(
     button: str = "primary",
     confidence: Optional[float] = None,
     position: str | tuple[int, int] = "center",
+    backend: str = "standard",
 ):
     """Find a template and click at the specified position."""
     from pytomator.core.vision.template_matcher import find_on_screen
+    from pytomator.core.vision.capture_tool import (
+        get_active_search_region,
+        get_active_window_info,
+    )
+
+    backend = backend.lower()
+    if backend not in {"standard", "directinput"}:
+        raise ValueError("backend must be 'standard' or 'directinput'")
+    if backend == "directinput" and sys.platform != "win32":
+        raise RuntimeError("The directinput mouse backend is available only on Windows")
+
     template = _get_template(name)
     project_path = _get_project_path()
-    region = find_on_screen(template, project_path, confidence)
+    search_region, window_snapshot = get_active_search_region()
+    region = find_on_screen(
+        template,
+        project_path,
+        confidence,
+        search_region=search_region,
+        debug=_vision_debug_enabled(),
+        window_info=window_snapshot,
+    )
     if region is None:
         return False
+
+    # Do not click if another window gained focus after the screenshot.
+    window_id = window_snapshot.get("id")
+    if window_id is not None and get_active_window_info().get("id") != window_id:
+        return False
+
     px, py = _resolve_position(region, position)
-    pyautogui.click(px, py, button=button)
+
+    if backend == "directinput":
+        direct_button = {"primary": "left", "secondary": "right"}.get(button, button)
+        pydirectinput.moveTo(px, py)
+        pydirectinput.mouseDown(button=direct_button)
+        pydirectinput.mouseUp(button=direct_button)
+    else:
+        pyautogui.moveTo(px, py)
+        pyautogui.mouseDown(button=button)
+        pyautogui.mouseUp(button=button)
     return True
 
 

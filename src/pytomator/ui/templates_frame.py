@@ -291,6 +291,10 @@ class TemplatesFrame(QWidget):
         result = find_on_screen(
             self._current_template,
             self._project_manager.project_path,
+            debug=bool(
+                self._project_manager.project
+                and self._project_manager.project.settings.vision_debug
+            ),
         )
 
         if result:

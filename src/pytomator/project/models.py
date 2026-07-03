@@ -26,6 +26,10 @@ class ProjectSettings(BaseModel):
 
     loop_default: bool = Field(default=False, description="Default loop state when running scripts")
     auto_save: bool = Field(default=True, description="Automatically save on run/switch script")
+    vision_debug: bool = Field(
+        default=False,
+        description="Save template-matching diagnostic images and metadata",
+    )
     description: str = Field(default="", description="Project description")
 
     class Config:

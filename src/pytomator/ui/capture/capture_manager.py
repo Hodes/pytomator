@@ -33,7 +33,12 @@ class CaptureManager(QObject):
         super().__init__(parent)
         self._project_manager = project_manager
         self._overlay: Optional[CaptureOverlay] = None
+        self._overlays: set[CaptureOverlay] = set()
+        self._preview_dialog: Optional[CapturePreviewDialog] = None
         self._main_window: Optional[QMainWindow] = None
+        self._target_window_info: Optional[dict] = None
+        self._capture_active = False
+        self._cancelling = False
 
     def set_main_window(self, window: QMainWindow):
         """Set the reference to the main window (for minimize/restore)."""
@@ -45,6 +50,9 @@ class CaptureManager(QObject):
             # Can't capture without a project
             return
 
+        self.cancel_capture(emit_signal=False)
+        self._capture_active = True
+        self._target_window_info = None
         self._show_overlay()
 
     def _show_overlay(self):
@@ -52,11 +60,22 @@ class CaptureManager(QObject):
         # Minimize main window so user can see the screen
         if self._main_window:
             self._main_window.showMinimized()
+            QApplication.processEvents()
+
+        # Capture the external target after Pytomator is hidden, but before the
+        # overlay itself becomes the foreground window. Preserve it on recapture.
+        if self._target_window_info is None:
+            self._target_window_info = get_active_window_info()
 
         # Create overlay
-        self._overlay = CaptureOverlay()
-        self._overlay.region_selected.connect(self._on_region_selected)
-        self._overlay.cancelled.connect(self._on_capture_cancelled)
+        overlay = CaptureOverlay()
+        self._overlay = overlay
+        self._overlays.add(overlay)
+        overlay.destroyed.connect(
+            lambda _object=None, item=overlay: self._overlays.discard(item)
+        )
+        overlay.region_selected.connect(self._on_region_selected)
+        overlay.cancelled.connect(self._on_capture_cancelled)
 
         # Determine which monitor the cursor is on
         cursor_pos = QCursor.pos()
@@ -68,14 +87,16 @@ class CaptureManager(QObject):
                 break
 
         # Show overlay on the cursor's monitor
-        self._overlay.show_on_screen(target_screen)
+        overlay.show_on_screen(target_screen)
 
     def _on_region_selected(self, x: int, y: int, w: int, h: int):
         """Called when the user selects a region on the overlay."""
         # Close overlay
         if self._overlay:
-            self._overlay.close()
+            overlay = self._overlay
             self._overlay = None
+            self._overlays.discard(overlay)
+            overlay.close()
 
         # Restore main window
         if self._main_window:
@@ -96,37 +117,70 @@ class CaptureManager(QObject):
 
     def _on_capture_cancelled(self):
         """Called when the user cancels the overlay (Escape or too small)."""
-        if self._overlay:
-            self._overlay.close()
+        self.cancel_capture()
+
+    def cancel_capture(self, emit_signal: bool = True):
+        """Cancel every open part of the current capture workflow."""
+        if self._cancelling:
+            return
+
+        had_active_capture = bool(
+            self._capture_active or self._overlays or self._preview_dialog
+        )
+        self._cancelling = True
+        try:
+            dialog = self._preview_dialog
+            self._preview_dialog = None
+            if dialog is not None:
+                dialog.reject()
+
+            overlays = tuple(self._overlays)
+            self._overlays.clear()
             self._overlay = None
+            for overlay in overlays:
+                overlay.close()
+                overlay.deleteLater()
 
-        # Restore main window
-        if self._main_window:
-            self._main_window.showNormal()
-            self._main_window.raise_()
-            self._main_window.activateWindow()
+            self._capture_active = False
+            self._target_window_info = None
 
-        self.capture_cancelled.emit()
+            if self._main_window and had_active_capture:
+                self._main_window.showNormal()
+                self._main_window.raise_()
+                self._main_window.activateWindow()
+
+            if emit_signal and had_active_capture:
+                self.capture_cancelled.emit()
+        finally:
+            self._cancelling = False
 
     def _show_preview(self, pixmap: QPixmap, pil_image: Image.Image,
                       x: int, y: int, w: int, h: int):
         """Show the preview dialog and handle save/recapture."""
-        dialog = CapturePreviewDialog(pixmap, x, y, w, h, self._main_window)
+        dialog = CapturePreviewDialog(
+            pixmap,
+            x,
+            y,
+            w,
+            h,
+            self._main_window,
+            window_info=self._target_window_info,
+        )
+        self._preview_dialog = dialog
+        dialog.escape_pressed.connect(self.cancel_capture)
 
-        while True:
-            result = dialog.exec()
+        result = dialog.exec()
+        if self._preview_dialog is dialog:
+            self._preview_dialog = None
 
-            if dialog.is_accepted():
-                # Save the template
-                self._save_template(dialog, pil_image, x, y, w, h)
-                break
-            elif result == _DIALOG_RECAPTURE:
-                # User clicked "Capture Again"
-                self._show_overlay()
-                break
-            else:
-                # User cancelled
-                break
+        if dialog.is_accepted():
+            self._save_template(dialog, pil_image, x, y, w, h)
+            self._capture_active = False
+            self._target_window_info = None
+        elif result == _DIALOG_RECAPTURE:
+            self._show_overlay()
+        elif self._capture_active:
+            self.cancel_capture()
 
     def _save_template(self, dialog: CapturePreviewDialog, pil_image: Image.Image,
                        x: int, y: int, w: int, h: int):
@@ -139,7 +193,7 @@ class CaptureManager(QObject):
 
         # Get metadata (virtual screen: left, top, width, height)
         v_left, v_top, screen_w, screen_h = get_screen_size()
-        window_info = get_active_window_info()
+        window_info = self._target_window_info or get_active_window_info()
 
         # Calculate relative coordinates
         rel_x = x - window_info["left"] if window_info["width"] > 0 else 0
@@ -147,8 +201,8 @@ class CaptureManager(QObject):
 
         # Calculate percentages
         pct_abs = (
-            round(x / screen_w * 100, 2) if screen_w > 0 else 0.0,
-            round(y / screen_h * 100, 2) if screen_h > 0 else 0.0,
+            round((x - v_left) / screen_w * 100, 2) if screen_w > 0 else 0.0,
+            round((y - v_top) / screen_h * 100, 2) if screen_h > 0 else 0.0,
             round(w / screen_w * 100, 2) if screen_w > 0 else 0.0,
             round(h / screen_h * 100, 2) if screen_h > 0 else 0.0,
         )

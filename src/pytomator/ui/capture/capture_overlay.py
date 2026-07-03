@@ -182,7 +182,18 @@ class CaptureOverlay(QWidget):
 class CapturePreviewDialog(QDialog):
     """Dialog shown after a region is captured, allowing the user to review and save."""
 
-    def __init__(self, pixmap: QPixmap, x: int, y: int, w: int, h: int, parent=None):
+    escape_pressed = pyqtSignal()
+
+    def __init__(
+        self,
+        pixmap: QPixmap,
+        x: int,
+        y: int,
+        w: int,
+        h: int,
+        parent=None,
+        window_info: dict | None = None,
+    ):
         super().__init__(parent)
 
         self.setWindowTitle("Capture Preview")
@@ -206,7 +217,7 @@ class CapturePreviewDialog(QDialog):
             self._screen_h = 1080
         self._virtual_left = 0
         self._virtual_top = 0
-        self._window_info = get_active_window_info()
+        self._window_info = window_info or get_active_window_info()
 
         self._accepted = False
         self._template_name = ""
@@ -300,6 +311,12 @@ class CapturePreviewDialog(QDialog):
         self._confidence = self._confidence_spin.value()
         self._accepted = True
         self.accept()
+
+    def keyPressEvent(self, event):
+        if event.key() == Qt.Key.Key_Escape:
+            self.escape_pressed.emit()
+            return
+        super().keyPressEvent(event)
 
     @property
     def template_name(self) -> str:

@@ -48,6 +48,11 @@ class SettingsFrame(QWidget):
         self.project_auto_save = QCheckBox("Auto-save before running")
         project_layout.addRow(self.project_auto_save)
 
+        self.project_vision_debug = QCheckBox(
+            "Save Vision debug captures (last 20 attempts)"
+        )
+        project_layout.addRow(self.project_vision_debug)
+
         self.layout.addWidget(self.project_group)
 
         # ── Save buttons ────────────────────────────────────
@@ -111,6 +116,7 @@ class SettingsFrame(QWidget):
             if settings:
                 self.project_loop_default.setChecked(settings.loop_default)
                 self.project_auto_save.setChecked(settings.auto_save)
+                self.project_vision_debug.setChecked(settings.vision_debug)
 
     def _on_save_project(self):
         """Save project settings from UI back to the model."""
@@ -120,4 +126,7 @@ class SettingsFrame(QWidget):
         self.project_manager.update_project_settings(
             loop_default=self.project_loop_default.isChecked(),
             auto_save=self.project_auto_save.isChecked(),
+            vision_debug=self.project_vision_debug.isChecked(),
         )
+        if self.project_manager.project_path is not None:
+            self.project_manager.save_project()
