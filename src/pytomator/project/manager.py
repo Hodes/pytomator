@@ -33,19 +33,44 @@ class ProjectManager(EventEmitter):
     # Project lifecycle
     # ------------------------------------------------------------------
 
+    def _release_current_project(self) -> None:
+        """Release resources owned by the current project and notify listeners."""
+        if self.project is None:
+            return
+        if self._project_path is not None:
+            from pytomator.core.vision.template_matcher_registry import (
+                release_template_matcher,
+            )
+
+            release_template_matcher(self._project_path)
+        self.project = None
+        self._project_path = None
+        self.emit("project_closed")
+
+    def _replace_project(
+        self,
+        project: Project,
+        project_path: Optional[Path],
+    ) -> Project:
+        """Install a prepared project after cleanly releasing the current one."""
+        self._release_current_project()
+        self.project = project
+        self._project_path = project_path
+        self.emit("project_loaded")
+        return project
+
     def create_project(self, name: str, description: str = "") -> Project:
         """Create and load a new empty project."""
-        self.project = self.storage.create_new(name, description)
-        self._project_path = None
-        self.emit("project_loaded")
-        return self.project
+        project = self.storage.create_new(name, description)
+        return self._replace_project(project, None)
 
     def load_project(self, path: Path) -> Project:
         """Load a project from a .pytom file."""
-        self.project = self.storage.load(path)
-        self._project_path = self.storage.recent_path
-        self.emit("project_loaded")
-        return self.project
+        # Load first so a malformed/missing target does not disturb the current
+        # project or its project-scoped resources.
+        project = self.storage.load(path)
+        loaded_path = self.storage.recent_path
+        return self._replace_project(project, loaded_path)
 
     def save_project(self, path: Optional[Path] = None) -> bool:
         """Save the current project. If path is None, uses the last path."""
@@ -63,9 +88,7 @@ class ProjectManager(EventEmitter):
 
     def close_project(self):
         """Close the current project (no save)."""
-        self.project = None
-        self._project_path = None
-        self.emit("project_closed")
+        self._release_current_project()
 
     @property
     def project_path(self) -> Optional[Path]:
@@ -204,4 +227,3 @@ class ProjectManager(EventEmitter):
                 setattr(self.project.settings, key, value)
         self.project.updated_at = type(self.project.updated_at).now()
         self.emit("project_updated")
-

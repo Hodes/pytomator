@@ -42,6 +42,10 @@ _scale_cache: dict[str, float] = {}
 def reset_scale_cache() -> None:
     """Clear successful multi-scale hints between script run cycles."""
     _scale_cache.clear()
+    from pytomator.core.vision.template_matcher_registry import _matchers
+
+    for matcher in _matchers.values():
+        matcher.reset_search_state()
 
 
 def _pil_to_cv2(image: Image.Image) -> np.ndarray:
@@ -230,6 +234,16 @@ def match_on_screen(
     window_info: Optional[dict] = None,
 ) -> MatchDetails:
     """Run one match and retain its best score independently of the threshold."""
+    from pytomator.core.vision.template_matcher_registry import get_template_matcher
+
+    return get_template_matcher(project_path).match_on_screen(
+        template,
+        confidence,
+        search_region,
+        debug=debug,
+        window_info=window_info,
+    )
+    # Legacy implementation retained temporarily below for easy comparison.
     threshold = confidence if confidence is not None else template.confidence
     template_img = load_template_image(project_path, template.image_path)
     if template_img is None:
@@ -366,14 +380,11 @@ def find_on_screen(
         Tuple (x, y, w, h) of the best match region on screen,
         or None if no match meets the confidence threshold.
     """
-    return match_on_screen(
-        template,
-        project_path,
-        confidence,
-        search_region,
-        debug=debug,
-        window_info=window_info,
-    ).region
+    from pytomator.core.vision.template_matcher_registry import get_template_matcher
+
+    return get_template_matcher(project_path).find_on_screen(
+        template, confidence, search_region, debug=debug, window_info=window_info
+    )
 
 
 def find_all_on_screen(
@@ -392,7 +403,12 @@ def find_all_on_screen(
     Returns:
         List of (x, y, w, h) tuples for each match found.
     """
-    # Load template image
+    from pytomator.core.vision.template_matcher_registry import get_template_matcher
+
+    return get_template_matcher(project_path).find_all_on_screen(
+        template, confidence, search_region
+    )
+    # Legacy implementation retained temporarily below for easy comparison.
     template_img = load_template_image(project_path, template.image_path)
     if template_img is None:
         return []

@@ -12,6 +12,11 @@ from PIL import Image
 from pytomator.core.automator import api
 from pytomator.core.vision import capture_tool, template_matcher
 from pytomator.core.vision.models import TemplateCapture
+from pytomator.core.vision.template_matcher_registry import (
+    clear_template_matchers,
+    get_template_matcher,
+)
+from pytomator.core.vision.template_matcher_service import TemplateMatcher
 
 
 class ActiveSearchRegionTests(unittest.TestCase):
@@ -80,6 +85,9 @@ class ActiveSearchRegionTests(unittest.TestCase):
 
 
 class TemplateMatcherTests(unittest.TestCase):
+    def tearDown(self):
+        clear_template_matchers()
+
     @staticmethod
     def _matching_images():
         screen = np.zeros((30, 40, 3), dtype=np.uint8)
@@ -375,6 +383,75 @@ class TemplateMatcherTests(unittest.TestCase):
         self.assertFalse(details.found)
         self.assertEqual(details.mode, "multi_scale")
         self.assertGreater(len(details.scale_scores), 1)
+
+    def test_registry_isolates_matchers_by_project(self):
+        first = get_template_matcher(Path("first.pytom"))
+        same = get_template_matcher(Path("first.pytom"))
+        second = get_template_matcher(Path("second.pytom"))
+
+        self.assertIs(first, same)
+        self.assertIsNot(first, second)
+
+    @patch("pytomator.core.vision.template_matcher.capture_region")
+    @patch("pytomator.core.vision.template_matcher.load_template_image")
+    def test_repeated_search_reuses_loaded_and_resized_template(
+        self, load_template, capture_region
+    ):
+        screen, pattern = self._matching_images()
+        load_template.return_value = pattern
+        capture_region.return_value = screen
+        template = TemplateCapture(
+            id="reused",
+            name="reused",
+            image_path="templates/reused.png",
+            region_abs=(0, 0, 10, 8),
+            confidence=0.9,
+        )
+        matcher = TemplateMatcher(Path("cache-test.pytom"))
+
+        matcher.find_on_screen(
+            template, search_region={"left": 0, "top": 0, "width": 40, "height": 30}
+        )
+        matcher.find_on_screen(
+            template, search_region={"left": 0, "top": 0, "width": 40, "height": 30}
+        )
+
+        load_template.assert_called_once()
+        self.assertEqual(len(matcher._templates["reused"].scaled), 1)
+
+    @patch("pytomator.core.vision.template_matcher.capture_region")
+    @patch("pytomator.core.vision.template_matcher.load_template_image")
+    def test_local_miss_falls_back_to_full_search(
+        self, load_template, capture_region
+    ):
+        _, pattern = self._matching_images()
+        full = np.zeros((100, 160, 3), dtype=np.uint8)
+        full[10:18, 10:20] = np.asarray(pattern)
+        current = [full]
+
+        def capture(x, y, width, height):
+            return Image.fromarray(current[0][y:y + height, x:x + width])
+
+        load_template.return_value = pattern
+        capture_region.side_effect = capture
+        template = TemplateCapture(
+            id="moving",
+            name="moving",
+            image_path="templates/moving.png",
+            region_abs=(0, 0, 10, 8),
+            confidence=0.9,
+        )
+        matcher = TemplateMatcher(Path("local-test.pytom"))
+        search = {"left": 0, "top": 0, "width": 160, "height": 100}
+        self.assertEqual(matcher.find_on_screen(template, search_region=search)[:2], (10, 10))
+
+        moved = np.zeros_like(full)
+        moved[70:78, 130:140] = np.asarray(pattern)
+        current[0] = moved
+        capture_region.reset_mock()
+
+        self.assertEqual(matcher.find_on_screen(template, search_region=search)[:2], (130, 70))
+        self.assertEqual(capture_region.call_count, 2)
 
 
 class ClickTemplateTests(unittest.TestCase):

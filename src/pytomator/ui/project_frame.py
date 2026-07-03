@@ -61,6 +61,8 @@ class ProjectFrame(QWidget):
         )
         if not path_str:
             return
+        if not self._confirm_project_replacement():
+            return
         path = Path(path_str)
         try:
             self.project_manager.load_project(path)
@@ -199,6 +201,24 @@ class ProjectFrame(QWidget):
     # Slots
     # ------------------------------------------------------------------
 
+    def _confirm_project_replacement(self) -> bool:
+        """Save, discard, or cancel before replacing/closing a project."""
+        if not self.project_manager.is_project_open:
+            return True
+        reply = QMessageBox.question(
+            self,
+            "Replace Project",
+            "Do you want to save the current project before continuing?",
+            QMessageBox.StandardButton.Yes
+            | QMessageBox.StandardButton.No
+            | QMessageBox.StandardButton.Cancel,
+        )
+        if reply == QMessageBox.StandardButton.Cancel:
+            return False
+        if reply == QMessageBox.StandardButton.Yes:
+            return self._on_save()
+        return True
+
     def _on_new_project(self):
         name, ok = QInputDialog.getText(
             self, "New Project", "Project name:"
@@ -210,6 +230,8 @@ class ProjectFrame(QWidget):
             self, "New Project", "Description (optional):"
         )
         description = description.strip() if ok else ""
+        if not self._confirm_project_replacement():
+            return
         self.project_manager.create_project(name, description)
         self._update_ui_state()
         self.project_opened.emit()
@@ -224,6 +246,8 @@ class ProjectFrame(QWidget):
         if path is None or not path.is_file():
             self._update_ui_state()
             return
+        if not self._confirm_project_replacement():
+            return
         try:
             self.project_manager.load_project(path)
             self._save_last_project(self.project_manager.project_path or path)
@@ -233,21 +257,24 @@ class ProjectFrame(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to reopen project:\n{e}")
             self._update_ui_state()
 
-    def _on_save(self):
+    def _on_save(self) -> bool:
         # Sync name/description from UI to model before saving
         self._sync_metadata()
-        success = self.project_manager.save_project()
-        if not success:
-            # No path yet → do Save As
-            self._on_save_as()
-        else:
-            # After saving, persist the directory
+        try:
+            success = self.project_manager.save_project()
+            if not success:
+                # No path yet → do Save As
+                return self._on_save_as()
             path = self.project_manager.project_path
             if path:
                 self._save_last_project(path)
             self._update_ui_state()
+            return True
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save project:\n{e}")
+            return False
 
-    def _on_save_as(self):
+    def _on_save_as(self) -> bool:
         self._sync_metadata()
         start_dir = self._get_last_dir()
         path_str, _ = QFileDialog.getSaveFileName(
@@ -255,30 +282,25 @@ class ProjectFrame(QWidget):
             "Pytomator Project (*.pytom);;All Files (*)"
         )
         if not path_str:
-            return
+            return False
         path = Path(path_str)
-        success = self.project_manager.save_project(path)
-        if not success:
-            QMessageBox.critical(self, "Error", "Failed to save project.")
-        else:
+        try:
+            success = self.project_manager.save_project(path)
+            if not success:
+                QMessageBox.critical(self, "Error", "Failed to save project.")
+                return False
             project_path = self.project_manager.project_path
             if project_path:
                 self._save_last_project(project_path)
-        self._update_ui_state()
+            self._update_ui_state()
+            return True
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to save project:\n{e}")
+            return False
 
     def _on_close(self):
-        if self.project_manager.is_project_open:
-            reply = QMessageBox.question(
-                self, "Close Project",
-                "Do you want to save before closing?",
-                QMessageBox.StandardButton.Yes
-                | QMessageBox.StandardButton.No
-                | QMessageBox.StandardButton.Cancel
-            )
-            if reply == QMessageBox.StandardButton.Cancel:
-                return
-            if reply == QMessageBox.StandardButton.Yes:
-                self._on_save()
+        if not self._confirm_project_replacement():
+            return
         self.project_manager.close_project()
         self._update_ui_state()
         self.project_closed.emit()

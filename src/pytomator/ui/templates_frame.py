@@ -14,7 +14,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 
 from pytomator.core.vision.models import TemplateCapture
 from pytomator.core.vision.capture_tool import load_template_image
-from pytomator.core.vision.template_matcher import find_on_screen
+from pytomator.core.vision.template_matcher_registry import get_template_matcher
 from pytomator.core.vision.search_context import prepare_search_context
 from pytomator.project.manager import ProjectManager
 from pytomator.ui.capture.capture_manager import CaptureManager
@@ -358,9 +358,10 @@ class TemplatesFrame(QWidget):
             self._current_template,
             autofocus=None,
         )
-        result = None if context is None else find_on_screen(
+        result = None if context is None else get_template_matcher(
+            self._project_manager.project_path
+        ).find_on_screen(
             self._current_template,
-            self._project_manager.project_path,
             search_region=context.region,
             debug=bool(
                 self._project_manager.project

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from pytomator.project.manager import ProjectManager
 from pytomator.ui.project_frame import ProjectFrame
@@ -100,6 +100,88 @@ class ProjectReopenTests(unittest.TestCase):
         self.assertEqual(self.config.config["last_project_path"], str(saved_path))
         self.assertEqual(self.config.config["last_project_dir"], str(saved_path.parent))
         self.assertTrue(saved_path.is_file())
+
+    def test_cancel_replacement_keeps_current_project(self):
+        self.manager.create_project("Current")
+
+        with patch(
+            "pytomator.ui.project_frame.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Cancel,
+        ), patch(
+            "pytomator.ui.project_frame.QInputDialog.getText",
+            side_effect=[("Replacement", True), ("", True)],
+        ):
+            self.frame._on_new_project()
+
+        self.assertEqual(self.manager.project.name, "Current")
+
+    def test_cancel_save_as_aborts_replacement(self):
+        self.manager.create_project("Unsaved")
+
+        with patch(
+            "pytomator.ui.project_frame.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.Yes,
+        ), patch(
+            "pytomator.ui.project_frame.QFileDialog.getSaveFileName",
+            return_value=("", ""),
+        ), patch(
+            "pytomator.ui.project_frame.QInputDialog.getText",
+            side_effect=[("Replacement", True), ("", True)],
+        ):
+            self.frame._on_new_project()
+
+        self.assertEqual(self.manager.project.name, "Unsaved")
+        self.assertIsNone(self.manager.project_path)
+
+    def test_discard_then_create_emits_closed_before_loaded(self):
+        self.manager.create_project("Current")
+        events = []
+        self.manager.on("project_closed", lambda: events.append("closed"))
+        self.manager.on("project_loaded", lambda: events.append("loaded"))
+
+        with patch(
+            "pytomator.ui.project_frame.QMessageBox.question",
+            return_value=QMessageBox.StandardButton.No,
+        ), patch(
+            "pytomator.ui.project_frame.QInputDialog.getText",
+            side_effect=[("Replacement", True), ("Description", True)],
+        ):
+            self.frame._on_new_project()
+
+        self.assertEqual(events, ["closed", "loaded"])
+        self.assertEqual(self.manager.project.name, "Replacement")
+
+    def test_failed_load_preserves_current_project_and_matcher(self):
+        current_path = self._create_project_file("Current")
+        self.manager.load_project(current_path)
+        broken_path = self.root / "broken.pytom"
+        broken_path.write_text("not json", encoding="utf-8")
+        current_project = self.manager.project
+
+        with patch(
+            "pytomator.core.vision.template_matcher_registry.release_template_matcher"
+        ) as release:
+            with self.assertRaises(Exception):
+                self.manager.load_project(broken_path)
+
+        self.assertIs(self.manager.project, current_project)
+        self.assertEqual(self.manager.project_path, current_path)
+        release.assert_not_called()
+
+    def test_close_is_idempotent_and_releases_matcher_once(self):
+        path = self._create_project_file()
+        self.manager.load_project(path)
+        events = []
+        self.manager.on("project_closed", lambda: events.append("closed"))
+
+        with patch(
+            "pytomator.core.vision.template_matcher_registry.release_template_matcher"
+        ) as release:
+            self.manager.close_project()
+            self.manager.close_project()
+
+        release.assert_called_once_with(path)
+        self.assertEqual(events, ["closed"])
 
 
 if __name__ == "__main__":

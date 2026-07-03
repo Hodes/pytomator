@@ -375,7 +375,6 @@ def click_template(
     move_easing: Optional[str] = None,
 ):
     """Find a template and click at the specified position."""
-    from pytomator.core.vision.template_matcher import find_on_screen
     from pytomator.core.vision.capture_tool import (
         get_active_window_info,
     )
@@ -486,14 +485,14 @@ def template_exists(name: str, confidence: Optional[float] = None,
 def find_all_templates(name: str, confidence: Optional[float] = None,
                        autofocus: Optional[bool] = None):
     from pytomator.core.vision.search_context import prepare_search_context
-    from pytomator.core.vision.template_matcher import find_all_on_screen
+    from pytomator.core.vision.template_matcher_registry import get_template_matcher
 
     template = _get_template(name)
     context = prepare_search_context(template, autofocus=autofocus)
     if context is None:
         return []
-    return find_all_on_screen(
-        template, _get_project_path(), confidence, search_region=context.region
+    return get_template_matcher(_get_project_path()).find_all_on_screen(
+        template, confidence, search_region=context.region
     )
 
 
@@ -721,7 +720,7 @@ def hover_template(
     move_easing: Optional[str] = None,
 ):
     """Find a template and move the mouse to the specified position."""
-    from pytomator.core.vision.template_matcher import find_on_screen
+    from pytomator.core.vision.template_matcher_registry import get_template_matcher
     from pytomator.core.vision.capture_tool import get_active_window_info
     from pytomator.core.vision.search_context import prepare_search_context
 
@@ -730,9 +729,8 @@ def hover_template(
     context = prepare_search_context(template, autofocus=autofocus)
     if context is None:
         return False
-    region = find_on_screen(
+    region = get_template_matcher(project_path).find_on_screen(
         template,
-        project_path,
         confidence,
         search_region=context.region,
         debug=_vision_debug_enabled(),
