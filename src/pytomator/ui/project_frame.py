@@ -41,10 +41,16 @@ class ProjectFrame(QWidget):
         """Return the last project directory stored in config, or empty string."""
         return self.config_manager.config.get("last_project_dir", "")
 
-    def _save_last_dir(self, path: Path) -> None:
-        """Persist the directory of the given path to config."""
-        directory = str(path.parent)
-        self.config_manager.config["last_project_dir"] = directory
+    def _get_last_project_path(self) -> Path | None:
+        """Return the last project file stored in config, if any."""
+        path = self.config_manager.config.get("last_project_path", "")
+        return Path(path) if path else None
+
+    def _save_last_project(self, path: Path) -> None:
+        """Persist the project file and its directory to config."""
+        project_path = path.resolve()
+        self.config_manager.config["last_project_path"] = str(project_path)
+        self.config_manager.config["last_project_dir"] = str(project_path.parent)
         self.config_manager.save_config(self.config_manager.config)
 
     def _open_project_file(self, start_dir: str) -> None:
@@ -58,7 +64,9 @@ class ProjectFrame(QWidget):
         path = Path(path_str)
         try:
             self.project_manager.load_project(path)
-            self._save_last_dir(path)
+            project_path = self.project_manager.project_path
+            if project_path:
+                self._save_last_project(project_path)
             self._update_ui_state()
             self.project_opened.emit()
         except Exception as e:
@@ -179,10 +187,10 @@ class ProjectFrame(QWidget):
             self.status_label.setText("No project open")
 
         # Update last project section
-        last_dir = self._get_last_dir()
-        if last_dir:
-            self.last_project_label.setText(str(Path(last_dir).resolve()))
-            self.reopen_btn.setEnabled(True)
+        last_project_path = self._get_last_project_path()
+        if last_project_path:
+            self.last_project_label.setText(str(last_project_path.resolve()))
+            self.reopen_btn.setEnabled(last_project_path.is_file())
         else:
             self.last_project_label.setText("No recent project")
             self.reopen_btn.setEnabled(False)
@@ -211,11 +219,19 @@ class ProjectFrame(QWidget):
         self._open_project_file(start_dir)
 
     def _on_reopen_last(self):
-        """Quickly reopen the last project from the stored directory."""
-        last_dir = self._get_last_dir()
-        if not last_dir:
+        """Quickly reopen the last stored project file."""
+        path = self._get_last_project_path()
+        if path is None or not path.is_file():
+            self._update_ui_state()
             return
-        self._open_project_file(last_dir)
+        try:
+            self.project_manager.load_project(path)
+            self._save_last_project(self.project_manager.project_path or path)
+            self._update_ui_state()
+            self.project_opened.emit()
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to reopen project:\n{e}")
+            self._update_ui_state()
 
     def _on_save(self):
         # Sync name/description from UI to model before saving
@@ -228,7 +244,7 @@ class ProjectFrame(QWidget):
             # After saving, persist the directory
             path = self.project_manager.project_path
             if path:
-                self._save_last_dir(path)
+                self._save_last_project(path)
             self._update_ui_state()
 
     def _on_save_as(self):
@@ -245,7 +261,9 @@ class ProjectFrame(QWidget):
         if not success:
             QMessageBox.critical(self, "Error", "Failed to save project.")
         else:
-            self._save_last_dir(path)
+            project_path = self.project_manager.project_path
+            if project_path:
+                self._save_last_project(project_path)
         self._update_ui_state()
 
     def _on_close(self):

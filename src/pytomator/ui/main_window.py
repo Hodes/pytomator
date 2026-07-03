@@ -238,7 +238,7 @@ class MainWindow(QMainWindow):
 
                 # Se a janela estiver completamente fora da tela, resetar
                 if not screen_geometry.intersects(window_geometry):
-                    self.resize(600, 800)
+                    self.resize(800, 600)
                     self._center_on_screen()
 
             if maximized:
