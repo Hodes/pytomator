@@ -79,6 +79,7 @@ class MainWindow(QMainWindow):
 
         # Tab 1: Editor
         self.editor_frame = EditorFrame(self.script_runner, self.project_manager)
+        self.editor_frame._capture_region_signal.connect(self.capture_manager.start_capture)
         self.tabs.addTab(self.editor_frame, "Script Editor")
         self.tabs.setTabIcon(1, qta.icon("fa6s.code"))
 

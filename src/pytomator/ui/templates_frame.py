@@ -17,6 +17,7 @@ from pytomator.core.vision.capture_tool import load_template_image
 from pytomator.core.vision.template_matcher import find_on_screen
 from pytomator.project.manager import ProjectManager
 from pytomator.ui.capture.capture_manager import CaptureManager
+from pytomator.config import ConfigManager
 
 
 class TemplatesFrame(QWidget):
@@ -36,6 +37,9 @@ class TemplatesFrame(QWidget):
         self._project_manager.on("project_closed", self._on_project_changed)
         self._capture_manager.template_saved.connect(self._on_template_saved)
 
+        # Listen for config changes to update hotkey label
+        ConfigManager.get_instance().on("config_applied", self._update_capture_button_text)
+
         # Initial state: disabled until a project is loaded
         self._update_capture_button_state()
 
@@ -53,7 +57,7 @@ class TemplatesFrame(QWidget):
 
         list_header = QHBoxLayout()
         list_header.addWidget(QLabel("<b>Templates</b>"))
-        self._capture_btn = QPushButton("Capture New")
+        self._capture_btn = QPushButton()
         self._capture_btn.clicked.connect(self._on_capture_new)
         list_header.addWidget(self._capture_btn)
         left_layout.addLayout(list_header)
@@ -77,6 +81,9 @@ class TemplatesFrame(QWidget):
         splitter.setSizes([250, 500])
 
         main_layout.addWidget(splitter)
+
+        # Set initial button text with hotkey
+        self._update_capture_button_text()
 
         # Build details panel (initially empty state)
         self._build_details_panel()
@@ -204,10 +211,20 @@ class TemplatesFrame(QWidget):
 
         self._template_list.blockSignals(False)
 
+    def _update_capture_button_text(self, config=None):
+        """Update the capture button text to show the configured hotkey."""
+        if config is None:
+            config = ConfigManager.get_instance().config
+        hotkey = config.get("hotkeys", {}).get("capture_region", "ctrl+shift+f7")
+        # Display the hotkey in a user-friendly way: uppercase, no shift prefix redundancy
+        display = hotkey.replace("ctrl", "Ctrl").replace("shift", "Shift").replace("alt", "Alt").replace("+", "+")
+        self._capture_btn.setText(f"Capture New ({display})")
+
     def _update_capture_button_state(self):
         """Enable or disable the capture button based on project state."""
         has_project = self._project_manager.is_project_open and self._project_manager.project_path is not None
         self._capture_btn.setEnabled(has_project)
+        self._update_capture_button_text()
 
     def _on_project_changed(self):
         """Called when the project is loaded or closed."""

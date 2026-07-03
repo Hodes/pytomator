@@ -22,6 +22,7 @@ class EditorFrame(QWidget):
     script_error_signal = pyqtSignal(str)
     _run_script_hotkey_signal = pyqtSignal(str)  # Emitted from hotkey thread, handled on main thread
     _toggle_script_signal = pyqtSignal()          # Thread-safe toggle for global hotkey
+    _capture_region_signal = pyqtSignal()         # Thread-safe trigger for capture region hotkey
 
     def __init__(self, script_runner, project_manager: ProjectManager):
         super().__init__()
@@ -399,7 +400,14 @@ class EditorFrame(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to register global hotkey '{toggle_script_key}':\n{e}")
 
-        # 2. Per-script hotkeys
+        # 2. Capture region hotkey from config
+        capture_region_key = hotkey_cfg.get("capture_region", "ctrl+shift+f7")
+        try:
+            self.hotkeys.register("capture_region", capture_region_key.lower(), self._capture_region_signal.emit)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to register capture hotkey '{capture_region_key}':\n{e}")
+
+        # 3. Per-script hotkeys
         if self.project_manager.is_project_open:
             for script in self.project_manager.list_scripts():
                 if script.hotkey:
