@@ -6,10 +6,12 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import numpy as np
+import cv2
 from PIL import Image
 
 from pytomator.core.automator import api
 from pytomator.core.vision import capture_tool, template_matcher
+from pytomator.core.vision.models import TemplateCapture
 
 
 class ActiveSearchRegionTests(unittest.TestCase):
@@ -95,7 +97,15 @@ class TemplateMatcherTests(unittest.TestCase):
         screen, pattern = self._matching_images()
         load_template.return_value = pattern
         capture_region.return_value = screen
-        template = MagicMock(image_path="template.png", confidence=0.99)
+        template = SimpleNamespace(
+            id="template",
+            name="template",
+            image_path="template.png",
+            confidence=0.99,
+            multi_scale_enabled=False,
+            min_scale=0.5,
+            max_scale=3.0,
+        )
 
         result = template_matcher.find_on_screen(
             template,
@@ -144,7 +154,13 @@ class TemplateMatcherTests(unittest.TestCase):
         load_template.return_value = pattern
         capture_region.return_value = screen
         template = SimpleNamespace(
-            id="abc", name="capy", image_path="templates/abc.png", confidence=0.9
+            id="abc",
+            name="capy",
+            image_path="templates/abc.png",
+            confidence=0.9,
+            multi_scale_enabled=False,
+            min_scale=0.5,
+            max_scale=3.0,
         )
 
         with TemporaryDirectory() as tmp:
@@ -164,7 +180,13 @@ class TemplateMatcherTests(unittest.TestCase):
         load_template.return_value = pattern
         capture_region.return_value = screen
         template = SimpleNamespace(
-            id="abc", name="capy", image_path="templates/abc.png", confidence=1.1
+            id="abc",
+            name="capy",
+            image_path="templates/abc.png",
+            confidence=1.1,
+            multi_scale_enabled=False,
+            min_scale=0.5,
+            max_scale=3.0,
         )
         window = {
             "id": 7,
@@ -196,7 +218,9 @@ class TemplateMatcherTests(unittest.TestCase):
             self.assertEqual(metadata["match"]["best_region"], [-788, 108, 10, 8])
             self.assertGreater(metadata["match"]["score"], 0.9)
             self.assertEqual(metadata["match"]["scale"], 1.0)
-            self.assertGreater(len(metadata["match"]["scale_scores"]), 20)
+            self.assertEqual(metadata["match"]["mode"], "single_scale")
+            self.assertEqual(metadata["match"]["scale_range"], [1.0, 1.0])
+            self.assertEqual(len(metadata["match"]["scale_scores"]), 1)
 
     def test_debug_retention_keeps_twenty_attempts(self):
         with TemporaryDirectory() as tmp:
@@ -211,6 +235,145 @@ class TemplateMatcherTests(unittest.TestCase):
             self.assertEqual(len(list(debug_dir.glob("*_metadata.json"))), 20)
             self.assertFalse((debug_dir / "00_capy_metadata.json").exists())
             self.assertFalse((debug_dir / "00_capy_screen.png").exists())
+
+    def test_old_template_data_defaults_to_single_scale(self):
+        template = TemplateCapture.model_validate(
+            {
+                "name": "legacy",
+                "image_path": "templates/legacy.png",
+                "region_abs": [0, 0, 10, 10],
+            }
+        )
+
+        self.assertFalse(template.multi_scale_enabled)
+        self.assertEqual(template.min_scale, 0.5)
+        self.assertEqual(template.max_scale, 3.0)
+
+    def test_template_rejects_invalid_scale_range(self):
+        with self.assertRaises(ValueError):
+            TemplateCapture(
+                name="invalid",
+                image_path="templates/invalid.png",
+                region_abs=(0, 0, 10, 10),
+                min_scale=2.0,
+                max_scale=1.0,
+            )
+
+    @patch("pytomator.core.vision.template_matcher.capture_region")
+    @patch("pytomator.core.vision.template_matcher.load_template_image")
+    def test_single_scale_runs_one_match(
+        self, load_template, capture_region
+    ):
+        screen, pattern = self._matching_images()
+        load_template.return_value = pattern
+        capture_region.return_value = screen
+        template = TemplateCapture(
+            id="single",
+            name="single",
+            image_path="templates/single.png",
+            region_abs=(0, 0, 10, 8),
+            confidence=0.9,
+        )
+
+        with patch(
+            "pytomator.core.vision.template_matcher.cv2.matchTemplate",
+            wraps=cv2.matchTemplate,
+        ) as match_template:
+            details = template_matcher.match_on_screen(
+                template,
+                Path("."),
+                search_region={"left": 0, "top": 0, "width": 40, "height": 30},
+            )
+
+        self.assertTrue(details.found)
+        self.assertEqual(details.mode, "single_scale")
+        self.assertEqual(match_template.call_count, 1)
+
+    @patch("pytomator.core.vision.template_matcher.capture_region")
+    @patch("pytomator.core.vision.template_matcher.load_template_image")
+    def test_multiscale_cache_reuses_successful_scale(
+        self, load_template, capture_region
+    ):
+        template_array = np.random.default_rng(21).integers(
+            0, 256, size=(16, 20, 3), dtype=np.uint8
+        )
+        scaled = template_matcher._resize_template(template_array, 2.64)
+        height, width = scaled.shape[:2]
+        screen = np.zeros((100, 120, 3), dtype=np.uint8)
+        screen[20:20 + height, 30:30 + width] = scaled
+        load_template.return_value = Image.fromarray(template_array)
+        capture_region.return_value = Image.fromarray(screen)
+        template = TemplateCapture(
+            id="cached",
+            name="cached",
+            image_path="templates/cached.png",
+            region_abs=(0, 0, 20, 16),
+            confidence=0.8,
+            multi_scale_enabled=True,
+            min_scale=0.5,
+            max_scale=3.0,
+        )
+        template_matcher.reset_scale_cache()
+
+        first = template_matcher.match_on_screen(
+            template,
+            Path("."),
+            search_region={"left": 0, "top": 0, "width": 120, "height": 100},
+        )
+        second = template_matcher.match_on_screen(
+            template,
+            Path("."),
+            search_region={"left": 0, "top": 0, "width": 120, "height": 100},
+        )
+
+        self.assertTrue(first.found)
+        self.assertEqual(first.mode, "multi_scale")
+        self.assertEqual(second.mode, "scale_cache")
+        self.assertEqual(len(second.scale_scores), 1)
+        self.assertEqual(second.scale, first.scale)
+
+    @patch("pytomator.core.vision.template_matcher.capture_region")
+    @patch("pytomator.core.vision.template_matcher.load_template_image")
+    def test_failed_cache_falls_back_to_full_multiscale(
+        self, load_template, capture_region
+    ):
+        template_array = np.random.default_rng(31).integers(
+            0, 256, size=(16, 20, 3), dtype=np.uint8
+        )
+        scaled = template_matcher._resize_template(template_array, 2.0)
+        height, width = scaled.shape[:2]
+        matching_screen = np.zeros((100, 120, 3), dtype=np.uint8)
+        matching_screen[20:20 + height, 30:30 + width] = scaled
+        blank_screen = np.zeros_like(matching_screen)
+        load_template.return_value = Image.fromarray(template_array)
+        capture_region.side_effect = [
+            Image.fromarray(matching_screen),
+            Image.fromarray(blank_screen),
+        ]
+        template = TemplateCapture(
+            id="fallback",
+            name="fallback",
+            image_path="templates/fallback.png",
+            region_abs=(0, 0, 20, 16),
+            confidence=0.8,
+            multi_scale_enabled=True,
+        )
+        template_matcher.reset_scale_cache()
+
+        template_matcher.match_on_screen(
+            template,
+            Path("."),
+            search_region={"left": 0, "top": 0, "width": 120, "height": 100},
+        )
+        details = template_matcher.match_on_screen(
+            template,
+            Path("."),
+            search_region={"left": 0, "top": 0, "width": 120, "height": 100},
+        )
+
+        self.assertFalse(details.found)
+        self.assertEqual(details.mode, "multi_scale")
+        self.assertGreater(len(details.scale_scores), 1)
 
 
 class ClickTemplateTests(unittest.TestCase):

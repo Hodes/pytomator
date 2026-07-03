@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QSplitter, QGroupBox,
     QFormLayout, QDoubleSpinBox, QLineEdit, QMessageBox,
-    QFrame, QScrollArea,
+    QFrame, QScrollArea, QCheckBox,
 )
 from PyQt6.QtGui import QPixmap, QFont
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -15,6 +15,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from pytomator.core.vision.models import TemplateCapture
 from pytomator.core.vision.capture_tool import load_template_image
 from pytomator.core.vision.template_matcher import find_on_screen
+from pytomator.core.vision.search_context import prepare_search_context
 from pytomator.project.manager import ProjectManager
 from pytomator.ui.capture.capture_manager import CaptureManager
 from pytomator.config import ConfigManager
@@ -137,6 +138,28 @@ class TemplatesFrame(QWidget):
         self._confidence_spin.setValue(t.confidence)
         self._confidence_spin.valueChanged.connect(self._on_confidence_changed)
         edit_layout.addRow("Confidence:", self._confidence_spin)
+
+        self._multi_scale_check = QCheckBox("Enable multi-scale matching")
+        self._multi_scale_check.setChecked(t.multi_scale_enabled)
+        self._multi_scale_check.toggled.connect(self._on_multi_scale_toggled)
+        edit_layout.addRow("Scale matching:", self._multi_scale_check)
+
+        self._min_scale_spin = QDoubleSpinBox()
+        self._min_scale_spin.setRange(0.1, t.max_scale)
+        self._min_scale_spin.setSingleStep(0.1)
+        self._min_scale_spin.setDecimals(2)
+        self._min_scale_spin.setValue(t.min_scale)
+        self._min_scale_spin.valueChanged.connect(self._on_min_scale_changed)
+        edit_layout.addRow("Minimum scale:", self._min_scale_spin)
+
+        self._max_scale_spin = QDoubleSpinBox()
+        self._max_scale_spin.setRange(t.min_scale, 5.0)
+        self._max_scale_spin.setSingleStep(0.1)
+        self._max_scale_spin.setDecimals(2)
+        self._max_scale_spin.setValue(t.max_scale)
+        self._max_scale_spin.valueChanged.connect(self._on_max_scale_changed)
+        edit_layout.addRow("Maximum scale:", self._max_scale_spin)
+        self._set_scale_controls_enabled(t.multi_scale_enabled)
 
         self._details_layout.addWidget(edit_group)
 
@@ -283,18 +306,55 @@ class TemplatesFrame(QWidget):
         self._project_manager.project.updated_at = __import__("datetime").datetime.now()
         self._project_manager.save_project()
 
+    def _set_scale_controls_enabled(self, enabled: bool):
+        self._min_scale_spin.setEnabled(enabled)
+        self._max_scale_spin.setEnabled(enabled)
+
+    def _save_template_properties(self):
+        if not self._current_template or not self._project_manager.project:
+            return
+        self._project_manager.project.updated_at = __import__("datetime").datetime.now()
+        self._project_manager.save_project()
+
+    def _on_multi_scale_toggled(self, enabled: bool):
+        if not self._current_template:
+            return
+        self._current_template.multi_scale_enabled = enabled
+        self._set_scale_controls_enabled(enabled)
+        self._save_template_properties()
+
+    def _on_min_scale_changed(self, value: float):
+        if not self._current_template:
+            return
+        self._current_template.min_scale = value
+        self._max_scale_spin.setMinimum(value)
+        self._save_template_properties()
+
+    def _on_max_scale_changed(self, value: float):
+        if not self._current_template:
+            return
+        self._current_template.max_scale = value
+        self._min_scale_spin.setMaximum(value)
+        self._save_template_properties()
+
     def _on_locate(self):
         """Test template matching on the current screen."""
         if not self._current_template or not self._project_manager.project_path:
             return
 
-        result = find_on_screen(
+        context = prepare_search_context(
+            self._current_template,
+            autofocus=bool(self._current_template.active_window_title),
+        )
+        result = None if context is None else find_on_screen(
             self._current_template,
             self._project_manager.project_path,
+            search_region=context.region,
             debug=bool(
                 self._project_manager.project
                 and self._project_manager.project.settings.vision_debug
             ),
+            window_info=context.window,
         )
 
         if result:

@@ -46,6 +46,9 @@ def reset_import_cache() -> None:
     """Clear the import cache. Called before each script run cycle."""
     global _import_cache
     _import_cache = {}
+    from pytomator.core.vision.template_matcher import reset_scale_cache
+
+    reset_scale_cache()
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -86,6 +89,7 @@ def _vision_debug_enabled() -> bool:
     params={
         "name": "Name of the template (must exist in the current project).",
         "confidence": "Confidence threshold (0.0 to 1.0). If omitted, uses the template's default confidence.",
+        "autofocus": "If True, focuses the window associated with the template before searching.",
     },
     category="Vision",
     returns="Tuple (x, y, w, h) or None.",
@@ -93,24 +97,31 @@ def _vision_debug_enabled() -> bool:
         "region = find_template('btn_login')",
         "if region: click('primary', region[0] + region[2] // 2, region[1] + region[3] // 2)",
         "region = find_template('icon_settings', confidence=0.9)",
+        "region = find_template('btn_login', autofocus=True)",
     ],
     version="1.0",
 )
-def find_template(name: str, confidence: Optional[float] = None):
+def find_template(
+    name: str,
+    confidence: Optional[float] = None,
+    autofocus: bool = False,
+):
     """Find a template on the screen and return its bounding box."""
     from pytomator.core.vision.template_matcher import find_on_screen
-    from pytomator.core.vision.capture_tool import get_active_search_region
+    from pytomator.core.vision.search_context import prepare_search_context
 
     template = _get_template(name)
     project_path = _get_project_path()
-    search_region, window_snapshot = get_active_search_region()
+    context = prepare_search_context(template, autofocus=autofocus)
+    if context is None:
+        return None
     result = find_on_screen(
         template,
         project_path,
         confidence,
-        search_region=search_region,
+        search_region=context.region,
         debug=_vision_debug_enabled(),
-        window_info=window_snapshot,
+        window_info=context.window,
     )
     return result
 
@@ -165,6 +176,7 @@ def _resolve_position(
                     "'left_center', 'right_center', or a tuple (dx, dy) for a custom pixel offset "
                     "from the top-left corner. Default is 'center'.",
         "backend": "Mouse backend: 'standard' (PyAutoGUI) or 'directinput' (Windows only).",
+        "autofocus": "If True, focuses the window associated with the template before searching.",
     },
     category="Vision",
     returns="True if the template was found and clicked, False otherwise.",
@@ -175,6 +187,7 @@ def _resolve_position(
         "click_template('checkbox', position=(5, 5))",
         "click_template('slider', position='left_center')",
         "click_template('play', backend='directinput')  # Windows games/DirectX",
+        "click_template('btn_login', autofocus=True)",
     ],
     version="1.0",
 )
@@ -184,13 +197,14 @@ def click_template(
     confidence: Optional[float] = None,
     position: str | tuple[int, int] = "center",
     backend: str = "standard",
+    autofocus: bool = False,
 ):
     """Find a template and click at the specified position."""
     from pytomator.core.vision.template_matcher import find_on_screen
     from pytomator.core.vision.capture_tool import (
-        get_active_search_region,
         get_active_window_info,
     )
+    from pytomator.core.vision.search_context import prepare_search_context
 
     backend = backend.lower()
     if backend not in {"standard", "directinput"}:
@@ -200,20 +214,22 @@ def click_template(
 
     template = _get_template(name)
     project_path = _get_project_path()
-    search_region, window_snapshot = get_active_search_region()
+    context = prepare_search_context(template, autofocus=autofocus)
+    if context is None:
+        return False
     region = find_on_screen(
         template,
         project_path,
         confidence,
-        search_region=search_region,
+        search_region=context.region,
         debug=_vision_debug_enabled(),
-        window_info=window_snapshot,
+        window_info=context.window,
     )
     if region is None:
         return False
 
     # Do not click if another window gained focus after the screenshot.
-    window_id = window_snapshot.get("id")
+    window_id = context.window.get("id")
     if window_id is not None and get_active_window_info().get("id") != window_id:
         return False
 
@@ -237,6 +253,7 @@ def click_template(
         "name": "Name of the template (must exist in the current project).",
         "confidence": "Confidence threshold (0.0 to 1.0). If omitted, uses the template's default confidence.",
         "position": "Where to hover inside the region. Same options as click_template. Default is 'center'.",
+        "autofocus": "If True, focuses the window associated with the template before searching.",
     },
     category="Vision",
     returns="True if the template was found and hovered, False otherwise.",
@@ -244,6 +261,7 @@ def click_template(
         "hover_template('btn_login')",
         "hover_template('icon_settings', confidence=0.9)",
         "hover_template('slider', position='right_center')",
+        "hover_template('btn_login', autofocus=True)",
     ],
     version="1.0",
 )
@@ -251,13 +269,30 @@ def hover_template(
     name: str,
     confidence: Optional[float] = None,
     position: str | tuple[int, int] = "center",
+    autofocus: bool = False,
 ):
     """Find a template and move the mouse to the specified position."""
     from pytomator.core.vision.template_matcher import find_on_screen
+    from pytomator.core.vision.capture_tool import get_active_window_info
+    from pytomator.core.vision.search_context import prepare_search_context
+
     template = _get_template(name)
     project_path = _get_project_path()
-    region = find_on_screen(template, project_path, confidence)
+    context = prepare_search_context(template, autofocus=autofocus)
+    if context is None:
+        return False
+    region = find_on_screen(
+        template,
+        project_path,
+        confidence,
+        search_region=context.region,
+        debug=_vision_debug_enabled(),
+        window_info=context.window,
+    )
     if region is None:
+        return False
+    window_id = context.window.get("id")
+    if window_id is not None and get_active_window_info().get("id") != window_id:
         return False
     px, py = _resolve_position(region, position)
     pyautogui.moveTo(px, py)

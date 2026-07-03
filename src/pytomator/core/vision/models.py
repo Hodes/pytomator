@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 import uuid
 
 
@@ -42,7 +42,30 @@ class TemplateCapture(BaseModel):
         le=1.0,
         description="Default confidence threshold for template matching (0.0 to 1.0)",
     )
+    multi_scale_enabled: bool = Field(
+        default=False,
+        description="Whether to search for the template at multiple scales",
+    )
+    min_scale: float = Field(
+        default=0.5,
+        ge=0.1,
+        le=5.0,
+        description="Minimum template scale used by multi-scale matching",
+    )
+    max_scale: float = Field(
+        default=3.0,
+        ge=0.1,
+        le=5.0,
+        description="Maximum template scale used by multi-scale matching",
+    )
     created_at: datetime = Field(default_factory=datetime.now, description="Creation timestamp")
+
+    @model_validator(mode="after")
+    def _validate_scale_range(self):
+        if self.min_scale > self.max_scale:
+            raise ValueError("min_scale must be less than or equal to max_scale")
+        return self
 
     class Config:
         frozen = False  # Allow mutation at runtime
+        validate_assignment = True

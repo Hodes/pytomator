@@ -32,6 +32,16 @@ class MatchDetails:
     original_size: Optional[tuple[int, int]] = None
     scaled_size: Optional[tuple[int, int]] = None
     scale_scores: list[dict] = field(default_factory=list)
+    mode: str = "single_scale"
+    scale_range: Optional[tuple[float, float]] = None
+
+
+_scale_cache: dict[str, float] = {}
+
+
+def reset_scale_cache() -> None:
+    """Clear successful multi-scale hints between script run cycles."""
+    _scale_cache.clear()
 
 
 def _pil_to_cv2(image: Image.Image) -> np.ndarray:
@@ -62,6 +72,10 @@ def _scale_values(start: float, stop: float, step: float) -> list[float]:
 def _best_multiscale_match(
     screen: np.ndarray,
     template: np.ndarray,
+    min_scale: float = 0.5,
+    max_scale: float = 3.0,
+    *,
+    refine: bool = True,
 ) -> tuple[Optional[float], Optional[tuple[int, int]], Optional[tuple[int, int]], list[dict]]:
     """Find the strongest template match using coarse and refined scale passes."""
     screen_height, screen_width = screen.shape[:2]
@@ -111,12 +125,19 @@ def _best_multiscale_match(
             best_location = max_location
             best_size = (scaled_width, scaled_height)
 
-    for scale in _scale_values(0.5, 3.0, 0.1):
+    if min_scale == max_scale:
+        coarse_scales = [round(min_scale, 2)]
+    else:
+        coarse_scales = _scale_values(min_scale, max_scale, 0.1)
+        if coarse_scales[-1] != round(max_scale, 2):
+            coarse_scales.append(round(max_scale, 2))
+
+    for scale in coarse_scales:
         evaluate(scale)
 
-    if best_scale is not None:
-        refine_start = max(0.5, best_scale - 0.1)
-        refine_stop = min(3.0, best_scale + 0.1)
+    if refine and min_scale < max_scale and best_scale is not None:
+        refine_start = max(min_scale, best_scale - 0.1)
+        refine_stop = min(max_scale, best_scale + 0.1)
         for scale in _scale_values(refine_start, refine_stop, 0.02):
             evaluate(scale)
 
@@ -230,10 +251,44 @@ def match_on_screen(
     template_cv = _pil_to_cv2(template_img)
     t_h, t_w = template_cv.shape[:2]
 
-    best_scale, best_location, best_size, scale_scores = _best_multiscale_match(
-        screen_cv,
-        template_cv,
-    )
+    multi_scale = template.multi_scale_enabled
+    min_scale = template.min_scale if multi_scale else 1.0
+    max_scale = template.max_scale if multi_scale else 1.0
+    mode = "single_scale"
+
+    cached_scale = _scale_cache.get(template.id) if multi_scale else None
+    if cached_scale is not None and min_scale <= cached_scale <= max_scale:
+        best_scale, best_location, best_size, scale_scores = _best_multiscale_match(
+            screen_cv,
+            template_cv,
+            cached_scale,
+            cached_scale,
+            refine=False,
+        )
+        cached_score = next(
+            (item["score"] for item in scale_scores if item["score"] is not None),
+            None,
+        )
+        if cached_score is not None and cached_score >= threshold:
+            mode = "scale_cache"
+        else:
+            best_scale, best_location, best_size, scale_scores = _best_multiscale_match(
+                screen_cv,
+                template_cv,
+                min_scale,
+                max_scale,
+            )
+            mode = "multi_scale"
+    else:
+        best_scale, best_location, best_size, scale_scores = _best_multiscale_match(
+            screen_cv,
+            template_cv,
+            min_scale,
+            max_scale,
+            refine=multi_scale,
+        )
+        if multi_scale:
+            mode = "multi_scale"
     if best_location is None or best_size is None:
         details = MatchDetails(
             None,
@@ -243,6 +298,8 @@ def match_on_screen(
             False,
             original_size=(t_w, t_h),
             scale_scores=scale_scores,
+            mode=mode,
+            scale_range=(min_scale, max_scale),
         )
     else:
         x, y = best_location
@@ -269,7 +326,11 @@ def match_on_screen(
             original_size=(t_w, t_h),
             scaled_size=best_size,
             scale_scores=scale_scores,
+            mode=mode,
+            scale_range=(min_scale, max_scale),
         )
+        if found and multi_scale and best_scale is not None:
+            _scale_cache[template.id] = best_scale
 
     if debug:
         _save_debug_attempt(
