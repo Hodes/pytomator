@@ -28,9 +28,10 @@ The core automation API is located in `src\pytomator\core\automator\api.py`.
 - They are described and documented using decorator @pytomator_api `src\pytomator\core\decorators.py`
 
 
-
 ## Code Architecture
 
+- Multi platform support: The codebase is designed to be cross-platform
+    - The Code Design should be platform agnostic, and the code should be able to run on different operating systems without requiring significant modifications.
 - The design choosen for the project is based on the Model-View-Controller (MVC) pattern.
 - Preferably, OOP (Object-Oriented Programming) 
     - Prefer one file for each class, and one file for each interface.

@@ -1,6 +1,7 @@
 import sys
 import time
-from typing import TYPE_CHECKING
+from pathlib import Path
+from typing import TYPE_CHECKING, Optional
 
 import pyautogui
 from pytomator.core.decorators import pytomator_api
@@ -45,6 +46,170 @@ def reset_import_cache() -> None:
     """Clear the import cache. Called before each script run cycle."""
     global _import_cache
     _import_cache = {}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Vision / Template Matching API
+# ═══════════════════════════════════════════════════════════════
+
+def _get_template(name: str):
+    """Helper: find a TemplateCapture by name in the current project."""
+    if _project_manager is None or not _project_manager.is_project_open:
+        raise NameError("No project is currently open — cannot access templates")
+    project = _project_manager.project
+    if project is None:
+        raise NameError("No project is currently open")
+    for t in project.templates:
+        if t.name == name:
+            return t
+    raise NameError(f"Template '{name}' not found in the current project")
+
+
+def _get_project_path() -> Path:
+    """Helper: get the project path."""
+    if _project_manager is None or not _project_manager.is_project_open:
+        raise NameError("No project is currently open")
+    path = _project_manager.project_path
+    if path is None:
+        raise NameError("Project path is not set (unsaved project?)")
+    return path
+
+
+@pytomator_api(
+    description="Finds a template on the screen by name and returns its bounding box (x, y, w, h). "
+                "Returns None if the template is not found.",
+    params={
+        "name": "Name of the template (must exist in the current project).",
+        "confidence": "Confidence threshold (0.0 to 1.0). If omitted, uses the template's default confidence.",
+    },
+    category="Vision",
+    returns="Tuple (x, y, w, h) or None.",
+    examples=[
+        "region = find_template('btn_login')",
+        "if region: click('primary', region[0] + region[2] // 2, region[1] + region[3] // 2)",
+        "region = find_template('icon_settings', confidence=0.9)",
+    ],
+    version="1.0",
+)
+def find_template(name: str, confidence: Optional[float] = None):
+    """Find a template on the screen and return its bounding box."""
+    from pytomator.core.vision.template_matcher import find_on_screen
+    template = _get_template(name)
+    project_path = _get_project_path()
+    result = find_on_screen(template, project_path, confidence)
+    return result
+
+
+def _resolve_position(
+    region: tuple[int, int, int, int],
+    position: str | tuple[int, int],
+) -> tuple[int, int]:
+    """Resolve a position string or tuple into absolute (x, y) coordinates.
+
+    Args:
+        region: (x, y, w, h) bounding box of the matched template.
+        position: One of:
+            - "center" (default)
+            - "top_left", "top_right", "bottom_left", "bottom_right"
+            - "top_center", "bottom_center", "left_center", "right_center"
+            - (dx, dy) tuple for a custom offset from the top-left corner
+
+    Returns:
+        Absolute (x, y) coordinates.
+    """
+    x, y, w, h = region
+    if isinstance(position, (tuple, list)):
+        dx, dy = position
+        return (x + dx, y + dy)
+
+    pos = position.lower().replace(" ", "_")
+    cx = x + w // 2
+    cy = y + h // 2
+
+    return {
+        "center": (cx, cy),
+        "top_left": (x, y),
+        "top_center": (cx, y),
+        "top_right": (x + w, y),
+        "left_center": (x, cy),
+        "right_center": (x + w, cy),
+        "bottom_left": (x, y + h),
+        "bottom_center": (cx, y + h),
+        "bottom_right": (x + w, y + h),
+    }.get(pos, (cx, cy))
+
+
+@pytomator_api(
+    description="Finds a template on the screen and clicks at the specified position within the matched region.",
+    params={
+        "name": "Name of the template (must exist in the current project).",
+        "button": "Mouse button to use ('primary', 'secondary', 'middle'). Default is 'primary'.",
+        "confidence": "Confidence threshold (0.0 to 1.0). If omitted, uses the template's default confidence.",
+        "position": "Where to click inside the region. Can be a string like 'center', 'top_left', "
+                    "'top_right', 'bottom_left', 'bottom_right', 'top_center', 'bottom_center', "
+                    "'left_center', 'right_center', or a tuple (dx, dy) for a custom pixel offset "
+                    "from the top-left corner. Default is 'center'.",
+    },
+    category="Vision",
+    returns="True if the template was found and clicked, False otherwise.",
+    examples=[
+        "click_template('btn_login')",
+        "click_template('icon_settings', button='secondary', confidence=0.9)",
+        "click_template('btn_ok', position='bottom_right')",
+        "click_template('checkbox', position=(5, 5))",
+        "click_template('slider', position='left_center')",
+    ],
+    version="1.0",
+)
+def click_template(
+    name: str,
+    button: str = "primary",
+    confidence: Optional[float] = None,
+    position: str | tuple[int, int] = "center",
+):
+    """Find a template and click at the specified position."""
+    from pytomator.core.vision.template_matcher import find_on_screen
+    template = _get_template(name)
+    project_path = _get_project_path()
+    region = find_on_screen(template, project_path, confidence)
+    if region is None:
+        return False
+    px, py = _resolve_position(region, position)
+    pyautogui.click(px, py, button=button)
+    return True
+
+
+@pytomator_api(
+    description="Finds a template on the screen and moves the mouse to the specified position within the matched region.",
+    params={
+        "name": "Name of the template (must exist in the current project).",
+        "confidence": "Confidence threshold (0.0 to 1.0). If omitted, uses the template's default confidence.",
+        "position": "Where to hover inside the region. Same options as click_template. Default is 'center'.",
+    },
+    category="Vision",
+    returns="True if the template was found and hovered, False otherwise.",
+    examples=[
+        "hover_template('btn_login')",
+        "hover_template('icon_settings', confidence=0.9)",
+        "hover_template('slider', position='right_center')",
+    ],
+    version="1.0",
+)
+def hover_template(
+    name: str,
+    confidence: Optional[float] = None,
+    position: str | tuple[int, int] = "center",
+):
+    """Find a template and move the mouse to the specified position."""
+    from pytomator.core.vision.template_matcher import find_on_screen
+    template = _get_template(name)
+    project_path = _get_project_path()
+    region = find_on_screen(template, project_path, confidence)
+    if region is None:
+        return False
+    px, py = _resolve_position(region, position)
+    pyautogui.moveTo(px, py)
+    return True
 
 @pytomator_api(
     description="Enables or disables the use of pydirectinput for keys. Useful on Windows to avoid security blocks.",

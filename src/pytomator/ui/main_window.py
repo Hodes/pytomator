@@ -14,6 +14,8 @@ from pytomator.ui.editor_frame import EditorFrame
 from pytomator.ui.project_frame import ProjectFrame
 from pytomator.core.script_runner import ScriptRunner
 from pytomator.ui.settings_frame import SettingsFrame
+from pytomator.ui.templates_frame import TemplatesFrame
+from pytomator.ui.capture.capture_manager import CaptureManager
 from pytomator.project.manager import ProjectManager
 from pytomator.core.automator import api as automator_api
 
@@ -54,6 +56,8 @@ class MainWindow(QMainWindow):
         # ── Core services ──────────────────────────────────
         self.project_manager = ProjectManager()
         self.script_runner = ScriptRunner()
+        self.capture_manager = CaptureManager(self.project_manager, self)
+        self.capture_manager.set_main_window(self)
 
         # Register the project manager with the automator API so import_script works
         automator_api.set_project_manager(self.project_manager)
@@ -82,9 +86,14 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.settings_frame, "Settings")
         self.tabs.setTabIcon(2, qta.icon("fa5s.cog"))
 
-        # Tab 3: About
+        # Tab 3: Templates
+        self.templates_frame = TemplatesFrame(self.project_manager, self.capture_manager)
+        self.tabs.addTab(self.templates_frame, "Templates")
+        self.tabs.setTabIcon(3, qta.icon("fa6s.image"))
+
+        # Tab 4: About
         self.tabs.addTab(AboutFrame(), "About")
-        self.tabs.setTabIcon(3, qta.icon("mdi.help-circle"))
+        self.tabs.setTabIcon(4, qta.icon("mdi.help-circle"))
 
         # ── Status bar ─────────────────────────────────────
         self._current_icon = None

@@ -7,3 +7,5 @@ mss<11,>=10.0
 pillow<13,>=12.0
 qtawesome<2,>=1.4.0
 pydantic>=2.0
+opencv-python<5,>=4.10
+pywin32>=308

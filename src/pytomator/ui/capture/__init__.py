@@ -1,0 +1,1 @@
+"""Capture UI components: overlay window and preview dialog."""

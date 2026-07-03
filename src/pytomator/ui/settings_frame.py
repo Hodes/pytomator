@@ -29,6 +29,12 @@ class SettingsFrame(QWidget):
         self.toggle_run_hotkey_field.addWidget(self.toggle_run_hotkey_lineedit)
         global_layout.addRow(self.toggle_run_hotkey_field)
 
+        self.capture_hotkey_field = QHBoxLayout()
+        self.capture_hotkey_field.addWidget(QLabel("Capture Region Hotkey:"))
+        self.capture_hotkey_lineedit = QLineEdit()
+        self.capture_hotkey_field.addWidget(self.capture_hotkey_lineedit)
+        global_layout.addRow(self.capture_hotkey_field)
+
         self.layout.addWidget(global_group)
 
         # ── Project Settings ─────────────────────────────────
@@ -76,12 +82,14 @@ class SettingsFrame(QWidget):
         config = self.config_manager.config.copy()
         hotkeys = config.get("hotkeys", {})
         hotkeys["toggle_script"] = self.toggle_run_hotkey_lineedit.text().strip()
+        hotkeys["capture_region"] = self.capture_hotkey_lineedit.text().strip()
         config["hotkeys"] = hotkeys
         self.config_manager.save_config(config)
 
     def _apply_global_settings(self, config):
         hotkeys = config.get("hotkeys", {})
         self.toggle_run_hotkey_lineedit.setText(hotkeys.get("toggle_script", ""))
+        self.capture_hotkey_lineedit.setText(hotkeys.get("capture_region", ""))
 
     # ------------------------------------------------------------------
     # Project settings

@@ -22,6 +22,13 @@ src/pytomator/core/script_interrupted.py
 src/pytomator/core/script_runner.py
 src/pytomator/core/automator/__init__.py
 src/pytomator/core/automator/api.py
+src/pytomator/core/vision/__init__.py
+src/pytomator/core/vision/capture_tool.py
+src/pytomator/core/vision/models.py
+src/pytomator/project/__init__.py
+src/pytomator/project/manager.py
+src/pytomator/project/models.py
+src/pytomator/project/storage.py
 src/pytomator/resources/__init__.py
 src/pytomator/resources/resources_rc.py
 src/pytomator/ui/__init__.py
@@ -29,6 +36,7 @@ src/pytomator/ui/about_frame.py
 src/pytomator/ui/api_doc_generator.py
 src/pytomator/ui/editor_frame.py
 src/pytomator/ui/main_window.py
+src/pytomator/ui/project_frame.py
 src/pytomator/ui/settings_frame.py
 src/pytomator/ui/widgets/__init__.py
 src/pytomator/ui/widgets/code_editor.py

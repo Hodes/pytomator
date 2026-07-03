@@ -1,8 +1,10 @@
-"""Pydantic models for Project, Script, and ProjectSettings."""
+"""Pydantic models for Project, Script, ProjectSettings, and TemplateCapture."""
 
 from datetime import datetime
 from typing import List, Optional
 from pydantic import BaseModel, Field
+
+from pytomator.core.vision.models import TemplateCapture
 
 
 class Script(BaseModel):
@@ -42,6 +44,7 @@ class Project(BaseModel):
 
     # Content
     scripts: List[Script] = Field(default_factory=list, description="List of scripts in the project")
+    templates: List[TemplateCapture] = Field(default_factory=list, description="List of template captures in the project")
     settings: ProjectSettings = Field(default_factory=ProjectSettings, description="Project settings")
     current_script_name: Optional[str] = Field(default=None, description="Name of the last active script")
 
@@ -114,5 +117,39 @@ class Project(BaseModel):
         if script is None:
             return False
         script.code = code
+        self.updated_at = datetime.now()
+        return True
+
+    # ── Template management helpers ───────────────────────────
+
+    def get_template(self, name: str) -> Optional[TemplateCapture]:
+        """Find a template by name."""
+        for t in self.templates:
+            if t.name == name:
+                return t
+        return None
+
+    def add_template(self, template: TemplateCapture) -> None:
+        """Add a template to the project."""
+        if self.get_template(template.name):
+            raise ValueError(f"Template '{template.name}' already exists in project")
+        self.templates.append(template)
+        self.updated_at = datetime.now()
+
+    def remove_template(self, name: str) -> bool:
+        """Remove a template by name. Returns True if removed."""
+        template = self.get_template(name)
+        if template is None:
+            return False
+        self.templates.remove(template)
+        self.updated_at = datetime.now()
+        return True
+
+    def rename_template(self, old_name: str, new_name: str) -> bool:
+        """Rename a template. Returns True if renamed."""
+        template = self.get_template(old_name)
+        if template is None or self.get_template(new_name):
+            return False
+        template.name = new_name
         self.updated_at = datetime.now()
         return True

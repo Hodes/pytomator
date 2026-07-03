@@ -15,6 +15,8 @@ Requires-Dist: mss<11,>=10.0
 Requires-Dist: pillow<13,>=12.0
 Requires-Dist: qtawesome<2,>=1.4.0
 Requires-Dist: pydantic>=2.0
+Requires-Dist: opencv-python<5,>=4.10
+Requires-Dist: pywin32>=308
 Dynamic: license-file
 
 # Hodes Pytomator

@@ -1,0 +1,1 @@
+"""Vision module for template matching, screen capture, and template management."""
