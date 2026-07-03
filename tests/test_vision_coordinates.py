@@ -469,6 +469,34 @@ class ClickTemplateTests(unittest.TestCase):
         directinput.mouseDown.assert_called_once_with(button="left")
         directinput.mouseUp.assert_called_once_with(button="left")
 
+    @patch("pytomator.core.automator.api.time.sleep")
+    @patch("pytomator.core.vision.template_matcher.find_on_screen")
+    @patch("pytomator.core.vision.capture_tool.get_active_search_region")
+    @patch("pytomator.core.vision.capture_tool.get_active_window_info")
+    @patch("pytomator.core.automator.api._get_project_path")
+    @patch("pytomator.core.automator.api._get_template")
+    @patch("pytomator.core.automator.api.pyautogui")
+    def test_click_waits_after_move_and_while_pressed(
+        self,
+        pyautogui,
+        get_template,
+        get_project_path,
+        get_active_window_info,
+        get_active_search_region,
+        find_on_screen,
+        sleep,
+    ):
+        get_active_search_region.return_value = (
+            {"left": 0, "top": 0, "width": 100, "height": 100},
+            {"id": 1},
+        )
+        get_active_window_info.return_value = {"id": 1}
+        find_on_screen.return_value = (10, 10, 20, 20)
+
+        self.assertTrue(api.click_template("button"))
+
+        self.assertEqual(sleep.call_args_list, [unittest.mock.call(0.05)] * 2)
+
 
 class ExtendedVisionApiTests(unittest.TestCase):
     @patch("pytomator.core.automator.api.should_stop", return_value=True)

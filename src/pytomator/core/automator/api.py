@@ -1,5 +1,6 @@
 import sys
 import time
+from math import ceil
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -92,6 +93,129 @@ def _validate_backend(backend: str) -> str:
     return backend
 
 
+def _resolve_mouse_backend(backend: Optional[str] = None) -> str:
+    """Resolve an explicit backend or inherit the current project default."""
+    if backend is not None:
+        return _validate_backend(backend)
+
+    project = _project_manager.project if _project_manager is not None else None
+    configured = project.settings.mouse_backend if project is not None else "standard"
+    configured = configured.lower()
+    if configured not in {"standard", "directinput"}:
+        return "standard"
+    if configured == "directinput" and sys.platform != "win32":
+        return "standard"
+    return configured
+
+
+def _mouse_for_backend(backend: Optional[str] = None):
+    resolved = _resolve_mouse_backend(backend)
+    return (pydirectinput if resolved == "directinput" else pyautogui), resolved
+
+
+def _backend_button(button: str, backend: str) -> str:
+    if backend == "directinput":
+        return {"primary": "left", "secondary": "right"}.get(button, button)
+    return button
+
+
+def _resolve_mouse_movement(
+    duration: Optional[float] = None,
+    easing: Optional[str] = None,
+) -> tuple[float, str]:
+    project = _project_manager.project if _project_manager is not None else None
+    settings = project.settings if project is not None else None
+    resolved_duration = (
+        duration
+        if duration is not None
+        else getattr(settings, "mouse_move_duration", 0.3)
+    )
+    resolved_easing = (
+        easing
+        if easing is not None
+        else getattr(settings, "mouse_move_easing", "ease_out")
+    )
+    if resolved_duration < 0:
+        raise ValueError("duration must be non-negative")
+    if resolved_easing not in {"linear", "ease_out", "ease_in_out"}:
+        raise ValueError("easing must be 'linear', 'ease_out', or 'ease_in_out'")
+    return float(resolved_duration), resolved_easing
+
+
+def _ease(progress: float, easing: str) -> float:
+    if easing == "linear":
+        return progress
+    if easing == "ease_out":
+        return 1 - (1 - progress) ** 3
+    if easing == "ease_in_out":
+        return (
+            4 * progress ** 3
+            if progress < 0.5
+            else 1 - ((-2 * progress + 2) ** 3) / 2
+        )
+    raise ValueError("easing must be 'linear', 'ease_out', or 'ease_in_out'")
+
+
+def _interpolate_mouse_positions(
+    start: tuple[int, int],
+    destination: tuple[int, int],
+    duration: float,
+    easing: str,
+) -> list[tuple[int, int]]:
+    if duration < 0:
+        raise ValueError("duration must be non-negative")
+    if easing not in {"linear", "ease_out", "ease_in_out"}:
+        raise ValueError("easing must be 'linear', 'ease_out', or 'ease_in_out'")
+    if duration == 0 or start == destination:
+        return [destination]
+
+    steps = max(2, ceil(duration / 0.0125))
+    sx, sy = start
+    dx, dy = destination[0] - sx, destination[1] - sy
+    positions = []
+    for step in range(1, steps + 1):
+        progress = _ease(step / steps, easing)
+        positions.append((
+            round(sx + dx * progress),
+            round(sy + dy * progress),
+        ))
+    positions[-1] = destination
+    return positions
+
+
+def _move_mouse_to(
+    destination: tuple[int, int],
+    backend: Optional[str] = None,
+    duration: Optional[float] = None,
+    easing: Optional[str] = None,
+) -> None:
+    mouse, resolved_backend = _mouse_for_backend(backend)
+    duration, easing = _resolve_mouse_movement(duration, easing)
+    start = tuple(mouse.position())
+    positions = _interpolate_mouse_positions(start, destination, duration, easing)
+
+    if len(positions) == 1:
+        mouse.moveTo(*destination)
+        return
+
+    interval = duration / len(positions)
+    emitted = start
+    for index, position in enumerate(positions):
+        if should_stop():
+            raise ScriptInterrupted()
+        if resolved_backend == "directinput":
+            delta_x = position[0] - emitted[0]
+            delta_y = position[1] - emitted[1]
+            mouse.moveRel(delta_x, delta_y, relative=True)
+        else:
+            mouse.moveTo(*position)
+        emitted = position
+        if index < len(positions) - 1:
+            time.sleep(interval)
+    if resolved_backend == "directinput" and tuple(mouse.position()) != destination:
+        mouse.moveTo(*destination)
+
+
 def _find_template_with_context(name, confidence=None, autofocus=None):
     from pytomator.core.vision.template_matcher import find_on_screen
     from pytomator.core.vision.search_context import prepare_search_context
@@ -131,17 +255,16 @@ def _sleep_interruptibly(seconds: float) -> None:
         time.sleep(min(0.05, remaining))
 
 
-def _mouse_drag(start, destination, duration: float, backend: str) -> None:
-    backend = _validate_backend(backend)
+def _mouse_drag(start, destination, duration: float, backend: Optional[str]) -> None:
     if duration < 0:
         raise ValueError("duration must be non-negative")
-    mouse = pydirectinput if backend == "directinput" else pyautogui
+    mouse, backend = _mouse_for_backend(backend)
     mouse.moveTo(*start)
-    mouse.mouseDown(button="left")
+    mouse.mouseDown(button=_backend_button("primary", backend))
     try:
         mouse.moveTo(*destination, duration=duration)
     finally:
-        mouse.mouseUp(button="left")
+        mouse.mouseUp(button=_backend_button("primary", backend))
 
 
 @pytomator_api(
@@ -222,6 +345,9 @@ def _resolve_position(
                     "from the top-left corner. Default is 'center'.",
         "backend": "Mouse backend: 'standard' (PyAutoGUI) or 'directinput' (Windows only).",
         "autofocus": "If True, focuses the window associated with the template before searching.",
+        "smooth_move": "If True, moves gradually to the template before clicking.",
+        "move_duration": "Optional smooth movement duration override in seconds.",
+        "move_easing": "Optional easing override: linear, ease_out, or ease_in_out.",
     },
     category="Vision",
     returns="True if the template was found and clicked, False otherwise.",
@@ -233,6 +359,7 @@ def _resolve_position(
         "click_template('slider', position='left_center')",
         "click_template('play', backend='directinput')  # Windows games/DirectX",
         "click_template('btn_login', autofocus=True)",
+        "click_template('target', smooth_move=True)  # Gradual movement for games",
     ],
     version="1.0",
 )
@@ -241,8 +368,11 @@ def click_template(
     button: str = "primary",
     confidence: Optional[float] = None,
     position: str | tuple[int, int] = "center",
-    backend: str = "standard",
+    backend: Optional[str] = None,
     autofocus: Optional[bool] = None,
+    smooth_move: bool = False,
+    move_duration: Optional[float] = None,
+    move_easing: Optional[str] = None,
 ):
     """Find a template and click at the specified position."""
     from pytomator.core.vision.template_matcher import find_on_screen
@@ -251,7 +381,7 @@ def click_template(
     )
     from pytomator.core.vision.search_context import prepare_search_context
 
-    backend = _validate_backend(backend)
+    mouse, backend = _mouse_for_backend(backend)
     region, context = _find_template_with_context(name, confidence, autofocus)
     if region is None:
         return False
@@ -262,15 +392,20 @@ def click_template(
 
     px, py = _resolve_position(region, position)
 
-    if backend == "directinput":
-        direct_button = {"primary": "left", "secondary": "right"}.get(button, button)
-        pydirectinput.moveTo(px, py)
-        pydirectinput.mouseDown(button=direct_button)
-        pydirectinput.mouseUp(button=direct_button)
+    resolved_button = _backend_button(button, backend)
+    if smooth_move:
+        _move_mouse_to(
+            (px, py), backend=backend,
+            duration=move_duration, easing=move_easing,
+        )
+        if not _window_still_active(context):
+            return False
     else:
-        pyautogui.moveTo(px, py)
-        pyautogui.mouseDown(button=button)
-        pyautogui.mouseUp(button=button)
+        mouse.moveTo(px, py)
+    time.sleep(0.05)
+    mouse.mouseDown(button=resolved_button)
+    time.sleep(0.05)
+    mouse.mouseUp(button=resolved_button)
     return True
 
 
@@ -406,8 +541,8 @@ def wait_for_any_template(names, timeout: float = 10, interval: float = 0.2,
 def drag_template_to(name: str, x: int, y: int,
                      source_position: str | tuple[int, int] = "center",
                      duration: float = 0.5, confidence: Optional[float] = None,
-                     backend: str = "standard", autofocus: Optional[bool] = None) -> bool:
-    backend = _validate_backend(backend)
+                     backend: Optional[str] = None, autofocus: Optional[bool] = None) -> bool:
+    backend = _resolve_mouse_backend(backend)
     region, context = _find_template_with_context(name, confidence, autofocus)
     if region is None or not _window_still_active(context):
         return False
@@ -429,9 +564,9 @@ def drag_template_to_template(source: str, target: str,
                               target_position: str | tuple[int, int] = "center",
                               duration: float = 0.5,
                               confidence: Optional[float] = None,
-                              backend: str = "standard",
+                              backend: Optional[str] = None,
                               autofocus: Optional[bool] = None) -> bool:
-    backend = _validate_backend(backend)
+    backend = _resolve_mouse_backend(backend)
     source_region, source_context = _find_template_with_context(
         source, confidence, autofocus
     )
@@ -465,7 +600,7 @@ def drag_template_to_template(source: str, target: str,
 def click_relative_to_template(name: str, dx: int, dy: int,
                                button: str = "primary",
                                confidence: Optional[float] = None,
-                               backend: str = "standard",
+                               backend: Optional[str] = None,
                                autofocus: Optional[bool] = None) -> bool:
     return click_template(
         name, button=button, confidence=confidence, position=(dx, dy),
@@ -478,7 +613,8 @@ def click_relative_to_template(name: str, dx: int, dy: int,
     params={"name": "Template name.", "direction": "up or down.",
             "max_scrolls": "Maximum scroll attempts.", "amount": "Units per scroll.",
             "interval": "Delay after each scroll.", "confidence": "Optional confidence override.",
-            "autofocus": "Focus associated window before searching."},
+            "autofocus": "Focus associated window before searching.",
+            "backend": "Optional mouse backend override."},
     category="Vision", returns="Matched region or None.",
     examples=["region = scroll_until_template('footer', direction='down')"], version="1.0",
 )
@@ -486,7 +622,8 @@ def scroll_until_template(name: str, direction: str = "down",
                           max_scrolls: int = 20, amount: int = 3,
                           interval: float = 0.2,
                           confidence: Optional[float] = None,
-                          autofocus: Optional[bool] = None):
+                          autofocus: Optional[bool] = None,
+                          backend: Optional[str] = None):
     direction = direction.lower()
     if direction not in {"up", "down"}:
         raise ValueError("direction must be 'up' or 'down'")
@@ -504,8 +641,50 @@ def scroll_until_template(name: str, direction: str = "down",
             return region
         if attempt == max_scrolls:
             return None
-        pyautogui.scroll(amount if direction == "up" else -amount)
+        mouse, _ = _mouse_for_backend(backend)
+        mouse.scroll(amount if direction == "up" else -amount)
         _sleep_interruptibly(interval)
+
+
+@pytomator_api(
+    description="Finds a template and moves the mouse gradually to a position within it.",
+    params={
+        "name": "Template name.",
+        "confidence": "Optional confidence override.",
+        "position": "Destination within the matched region.",
+        "autofocus": "Focus the associated window before searching.",
+        "duration": "Optional movement duration override in seconds.",
+        "easing": "Optional easing override: linear, ease_out, or ease_in_out.",
+        "backend": "Optional mouse backend override.",
+    },
+    category="Vision",
+    returns="True if the template was found and the mouse moved, False otherwise.",
+    examples=[
+        "move_to_template('btn_login')",
+        "move_to_template('target', duration=0.5, easing='ease_in_out')",
+    ],
+    version="1.0",
+)
+def move_to_template(
+    name: str,
+    confidence: Optional[float] = None,
+    position: str | tuple[int, int] = "center",
+    autofocus: Optional[bool] = None,
+    duration: Optional[float] = None,
+    easing: Optional[str] = None,
+    backend: Optional[str] = None,
+) -> bool:
+    """Find a template and move gradually to the specified position."""
+    region, context = _find_template_with_context(name, confidence, autofocus)
+    if region is None or not _window_still_active(context):
+        return False
+    _move_mouse_to(
+        _resolve_position(region, position),
+        backend=backend,
+        duration=duration,
+        easing=easing,
+    )
+    return _window_still_active(context)
 
 
 @pytomator_api(
@@ -515,6 +694,10 @@ def scroll_until_template(name: str, direction: str = "down",
         "confidence": "Confidence threshold (0.0 to 1.0). If omitted, uses the template's default confidence.",
         "position": "Where to hover inside the region. Same options as click_template. Default is 'center'.",
         "autofocus": "If True, focuses the window associated with the template before searching.",
+        "smooth_move": "If True, moves gradually instead of teleporting.",
+        "move_duration": "Optional smooth movement duration override in seconds.",
+        "move_easing": "Optional easing override: linear, ease_out, or ease_in_out.",
+        "backend": "Optional mouse backend override.",
     },
     category="Vision",
     returns="True if the template was found and hovered, False otherwise.",
@@ -523,6 +706,7 @@ def scroll_until_template(name: str, direction: str = "down",
         "hover_template('icon_settings', confidence=0.9)",
         "hover_template('slider', position='right_center')",
         "hover_template('btn_login', autofocus=True)",
+        "hover_template('target', smooth_move=True)",
     ],
     version="1.0",
 )
@@ -531,6 +715,10 @@ def hover_template(
     confidence: Optional[float] = None,
     position: str | tuple[int, int] = "center",
     autofocus: Optional[bool] = None,
+    backend: Optional[str] = None,
+    smooth_move: bool = False,
+    move_duration: Optional[float] = None,
+    move_easing: Optional[str] = None,
 ):
     """Find a template and move the mouse to the specified position."""
     from pytomator.core.vision.template_matcher import find_on_screen
@@ -556,7 +744,16 @@ def hover_template(
     if window_id is not None and get_active_window_info().get("id") != window_id:
         return False
     px, py = _resolve_position(region, position)
-    pyautogui.moveTo(px, py)
+    if smooth_move:
+        _move_mouse_to(
+            (px, py), backend=backend,
+            duration=move_duration, easing=move_easing,
+        )
+        if not _window_still_active(context):
+            return False
+    else:
+        mouse, _ = _mouse_for_backend(backend)
+        mouse.moveTo(px, py)
     return True
 
 @pytomator_api(
@@ -619,6 +816,7 @@ def check_interruption():
         "button": "Mouse button to use ('primary', 'secondary', 'middle'). Default is 'primary'. Accepts left, right, middle.",
         "x": "X coordinate to click. If None, uses the current mouse position.",
         "y": "Y coordinate to click. If None, uses the current mouse position.",
+        "backend": "Optional mouse backend override.",
     },
     category="Mouse",
     returns=None,
@@ -630,11 +828,13 @@ def check_interruption():
     ],
     version="1.0",
 )
-def click(button="primary", x=None, y=None):
+def click(button="primary", x=None, y=None, backend: Optional[str] = None):
+    mouse, resolved_backend = _mouse_for_backend(backend)
+    button = _backend_button(button, resolved_backend)
     if x is None or y is None:
-        pyautogui.click(button=button)
+        mouse.click(button=button)
     else:
-        pyautogui.click(x, y, button=button)
+        mouse.click(x, y, button=button)
         
 @pytomator_api(
     description=
@@ -645,6 +845,7 @@ def click(button="primary", x=None, y=None):
         "button": "Mouse button to use ('primary', 'secondary', 'middle'). Default is 'primary'. Accepts left, right, middle.",
         "x": "X coordinate to hold the click. If None, uses the current mouse position.",
         "y": "Y coordinate to hold the click. If None, uses the current mouse position.",
+        "backend": "Optional mouse backend override.",
     },
     category="Mouse",
     returns=None,
@@ -655,10 +856,12 @@ def click(button="primary", x=None, y=None):
     ],
     version="1.0",
 )
-def click_hold(duration=1, button="primary", x=None, y=None):
-    pyautogui.mouseDown(x, y, button=button)
+def click_hold(duration=1, button="primary", x=None, y=None, backend: Optional[str] = None):
+    mouse, resolved_backend = _mouse_for_backend(backend)
+    button = _backend_button(button, resolved_backend)
+    mouse.mouseDown(x, y, button=button)
     wait(duration)
-    pyautogui.mouseUp(x, y, button=button)
+    mouse.mouseUp(x, y, button=button)
 
 @pytomator_api(
     description=
@@ -670,6 +873,7 @@ def click_hold(duration=1, button="primary", x=None, y=None):
         "y": "Y coordinate to click. If None, uses the current mouse position.",
         "clicks": "Number of clicks to perform.",
         "interval": "Interval in seconds between clicks. Accepts float values.",
+        "backend": "Optional mouse backend override.",
     },
     category="Mouse",
     returns=None,
@@ -680,8 +884,13 @@ def click_hold(duration=1, button="primary", x=None, y=None):
     ],
     version="1.0",
 )
-def clicks(button="primary", x=None, y=None, clicks=1, interval=0.5):
-    pyautogui.click(x, y, clicks=clicks, interval=interval, button=button)
+def clicks(button="primary", x=None, y=None, clicks=1, interval=0.5,
+           backend: Optional[str] = None):
+    mouse, resolved_backend = _mouse_for_backend(backend)
+    mouse.click(
+        x, y, clicks=clicks, interval=interval,
+        button=_backend_button(button, resolved_backend),
+    )
 
 @pytomator_api(
     description="Holds a key down for 'duration' seconds.",

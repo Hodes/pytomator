@@ -1,7 +1,7 @@
 """Pydantic models for Project, Script, ProjectSettings, and TemplateCapture."""
 
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 from pydantic import BaseModel, Field
 
 from pytomator.core.vision.models import TemplateCapture
@@ -29,6 +29,19 @@ class ProjectSettings(BaseModel):
     vision_debug: bool = Field(
         default=False,
         description="Save template-matching diagnostic images and metadata",
+    )
+    mouse_backend: Literal["standard", "directinput"] = Field(
+        default="standard",
+        description="Default backend used for mouse automation",
+    )
+    mouse_move_duration: float = Field(
+        default=0.3,
+        ge=0.0,
+        description="Default duration for smooth mouse movement, in seconds",
+    )
+    mouse_move_easing: Literal["linear", "ease_out", "ease_in_out"] = Field(
+        default="ease_out",
+        description="Default easing curve for smooth mouse movement",
     )
     description: str = Field(default="", description="Project description")
 

@@ -2,7 +2,7 @@
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QCheckBox, QGroupBox, QFormLayout
+    QPushButton, QCheckBox, QComboBox, QDoubleSpinBox, QGroupBox, QFormLayout
 )
 
 from pytomator.config.config_manager import ConfigManager
@@ -52,6 +52,28 @@ class SettingsFrame(QWidget):
             "Save Vision debug captures (last 20 attempts)"
         )
         project_layout.addRow(self.project_vision_debug)
+
+        self.project_mouse_backend = QComboBox()
+        self.project_mouse_backend.addItem("Standard (PyAutoGUI)", "standard")
+        self.project_mouse_backend.addItem("DirectInput", "directinput")
+        project_layout.addRow("Mouse backend:", self.project_mouse_backend)
+
+        self.project_mouse_move_duration = QDoubleSpinBox()
+        self.project_mouse_move_duration.setRange(0.0, 10.0)
+        self.project_mouse_move_duration.setDecimals(3)
+        self.project_mouse_move_duration.setSingleStep(0.05)
+        self.project_mouse_move_duration.setSuffix(" s")
+        project_layout.addRow(
+            "Smooth movement duration:", self.project_mouse_move_duration
+        )
+
+        self.project_mouse_move_easing = QComboBox()
+        self.project_mouse_move_easing.addItem("Linear", "linear")
+        self.project_mouse_move_easing.addItem("Ease out", "ease_out")
+        self.project_mouse_move_easing.addItem("Ease in/out", "ease_in_out")
+        project_layout.addRow(
+            "Smooth movement easing:", self.project_mouse_move_easing
+        )
 
         self.layout.addWidget(self.project_group)
 
@@ -117,6 +139,17 @@ class SettingsFrame(QWidget):
                 self.project_loop_default.setChecked(settings.loop_default)
                 self.project_auto_save.setChecked(settings.auto_save)
                 self.project_vision_debug.setChecked(settings.vision_debug)
+                index = self.project_mouse_backend.findData(settings.mouse_backend)
+                self.project_mouse_backend.setCurrentIndex(max(index, 0))
+                self.project_mouse_move_duration.setValue(
+                    settings.mouse_move_duration
+                )
+                easing_index = self.project_mouse_move_easing.findData(
+                    settings.mouse_move_easing
+                )
+                self.project_mouse_move_easing.setCurrentIndex(
+                    max(easing_index, 0)
+                )
 
     def _on_save_project(self):
         """Save project settings from UI back to the model."""
@@ -127,6 +160,9 @@ class SettingsFrame(QWidget):
             loop_default=self.project_loop_default.isChecked(),
             auto_save=self.project_auto_save.isChecked(),
             vision_debug=self.project_vision_debug.isChecked(),
+            mouse_backend=self.project_mouse_backend.currentData(),
+            mouse_move_duration=self.project_mouse_move_duration.value(),
+            mouse_move_easing=self.project_mouse_move_easing.currentData(),
         )
         if self.project_manager.project_path is not None:
             self.project_manager.save_project()
