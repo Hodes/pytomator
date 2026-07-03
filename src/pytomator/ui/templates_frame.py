@@ -139,6 +139,11 @@ class TemplatesFrame(QWidget):
         self._confidence_spin.valueChanged.connect(self._on_confidence_changed)
         edit_layout.addRow("Confidence:", self._confidence_spin)
 
+        self._autofocus_check = QCheckBox("Enable autofocus")
+        self._autofocus_check.setChecked(t.autofocus)
+        self._autofocus_check.toggled.connect(self._on_autofocus_toggled)
+        edit_layout.addRow("Window focus:", self._autofocus_check)
+
         self._multi_scale_check = QCheckBox("Enable multi-scale matching")
         self._multi_scale_check.setChecked(t.multi_scale_enabled)
         self._multi_scale_check.toggled.connect(self._on_multi_scale_toggled)
@@ -323,6 +328,12 @@ class TemplatesFrame(QWidget):
         self._set_scale_controls_enabled(enabled)
         self._save_template_properties()
 
+    def _on_autofocus_toggled(self, enabled: bool):
+        if not self._current_template:
+            return
+        self._current_template.autofocus = enabled
+        self._save_template_properties()
+
     def _on_min_scale_changed(self, value: float):
         if not self._current_template:
             return
@@ -344,7 +355,7 @@ class TemplatesFrame(QWidget):
 
         context = prepare_search_context(
             self._current_template,
-            autofocus=bool(self._current_template.active_window_title),
+            autofocus=None,
         )
         result = None if context is None else find_on_screen(
             self._current_template,

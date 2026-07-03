@@ -17,9 +17,12 @@ class SearchContext:
 def prepare_search_context(
     template: TemplateCapture,
     *,
-    autofocus: bool = False,
+    autofocus: Optional[bool] = None,
 ) -> Optional[SearchContext]:
     """Optionally focus the template's window and return its search region."""
+    if autofocus is None:
+        stored_autofocus = getattr(template, "autofocus", False)
+        autofocus = stored_autofocus if isinstance(stored_autofocus, bool) else False
     window: Optional[WindowInfo] = None
     if autofocus:
         if not template.active_window_title:

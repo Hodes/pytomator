@@ -380,6 +380,7 @@ def find_all_on_screen(
     template: TemplateCapture,
     project_path: Path,
     confidence: Optional[float] = None,
+    search_region: Optional[dict] = None,
 ) -> list[tuple[int, int, int, int]]:
     """Find all occurrences of a template on the current screen.
 
@@ -396,7 +397,10 @@ def find_all_on_screen(
     if template_img is None:
         return []
 
-    region, _ = get_active_search_region()
+    if search_region is None:
+        region, _ = get_active_search_region()
+    else:
+        region = search_region
     screen_img = capture_region(
         region["left"], region["top"], region["width"], region["height"]
     )

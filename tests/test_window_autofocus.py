@@ -114,6 +114,26 @@ class SearchContextTests(unittest.TestCase):
         self.assertEqual(context.region, region)
         get_region.assert_called_once_with(None)
 
+    @patch("pytomator.core.vision.capture_tool.get_active_search_region")
+    def test_explicit_false_overrides_template_autofocus(self, get_region):
+        template = make_template()
+        template.autofocus = True
+        get_region.return_value = ({"left": 0, "top": 0, "width": 10, "height": 10}, {"id": 1})
+
+        context = prepare_search_context(template, autofocus=False)
+
+        self.assertIsNotNone(context)
+        get_region.assert_called_once_with(None)
+
+    @patch("pytomator.core.vision.search_context.get_window_controller")
+    def test_omitted_autofocus_uses_template_default(self, get_controller):
+        template = make_template()
+        template.autofocus = True
+        get_controller.return_value = None
+
+        self.assertIsNone(prepare_search_context(template))
+        get_controller.assert_called_once_with()
+
 
 if __name__ == "__main__":
     unittest.main()

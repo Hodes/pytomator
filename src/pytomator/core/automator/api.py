@@ -83,6 +83,67 @@ def _vision_debug_enabled() -> bool:
     return bool(project and project.settings.vision_debug)
 
 
+def _validate_backend(backend: str) -> str:
+    backend = backend.lower()
+    if backend not in {"standard", "directinput"}:
+        raise ValueError("backend must be 'standard' or 'directinput'")
+    if backend == "directinput" and sys.platform != "win32":
+        raise RuntimeError("The directinput mouse backend is available only on Windows")
+    return backend
+
+
+def _find_template_with_context(name, confidence=None, autofocus=None):
+    from pytomator.core.vision.template_matcher import find_on_screen
+    from pytomator.core.vision.search_context import prepare_search_context
+
+    template = _get_template(name)
+    context = prepare_search_context(template, autofocus=autofocus)
+    if context is None:
+        return None, None
+    region = find_on_screen(
+        template,
+        _get_project_path(),
+        confidence,
+        search_region=context.region,
+        debug=_vision_debug_enabled(),
+        window_info=context.window,
+    )
+    return region, context
+
+
+def _window_still_active(context) -> bool:
+    from pytomator.core.vision.capture_tool import get_active_window_info
+
+    window_id = context.window.get("id")
+    return window_id is None or get_active_window_info().get("id") == window_id
+
+
+def _sleep_interruptibly(seconds: float) -> None:
+    if seconds < 0:
+        raise ValueError("interval must be non-negative")
+    end = time.monotonic() + seconds
+    while True:
+        if should_stop():
+            raise ScriptInterrupted()
+        remaining = end - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(0.05, remaining))
+
+
+def _mouse_drag(start, destination, duration: float, backend: str) -> None:
+    backend = _validate_backend(backend)
+    if duration < 0:
+        raise ValueError("duration must be non-negative")
+    mouse = pydirectinput if backend == "directinput" else pyautogui
+    mouse.moveTo(*start)
+    mouse.mouseDown(button="left")
+    try:
+        mouse.moveTo(*destination, duration=duration)
+    finally:
+        mouse.mouseUp(button="left")
+
+
 @pytomator_api(
     description="Finds a template on the screen by name and returns its bounding box (x, y, w, h). "
                 "Returns None if the template is not found.",
@@ -104,26 +165,10 @@ def _vision_debug_enabled() -> bool:
 def find_template(
     name: str,
     confidence: Optional[float] = None,
-    autofocus: bool = False,
+    autofocus: Optional[bool] = None,
 ):
     """Find a template on the screen and return its bounding box."""
-    from pytomator.core.vision.template_matcher import find_on_screen
-    from pytomator.core.vision.search_context import prepare_search_context
-
-    template = _get_template(name)
-    project_path = _get_project_path()
-    context = prepare_search_context(template, autofocus=autofocus)
-    if context is None:
-        return None
-    result = find_on_screen(
-        template,
-        project_path,
-        confidence,
-        search_region=context.region,
-        debug=_vision_debug_enabled(),
-        window_info=context.window,
-    )
-    return result
+    return _find_template_with_context(name, confidence, autofocus)[0]
 
 
 def _resolve_position(
@@ -197,7 +242,7 @@ def click_template(
     confidence: Optional[float] = None,
     position: str | tuple[int, int] = "center",
     backend: str = "standard",
-    autofocus: bool = False,
+    autofocus: Optional[bool] = None,
 ):
     """Find a template and click at the specified position."""
     from pytomator.core.vision.template_matcher import find_on_screen
@@ -206,31 +251,13 @@ def click_template(
     )
     from pytomator.core.vision.search_context import prepare_search_context
 
-    backend = backend.lower()
-    if backend not in {"standard", "directinput"}:
-        raise ValueError("backend must be 'standard' or 'directinput'")
-    if backend == "directinput" and sys.platform != "win32":
-        raise RuntimeError("The directinput mouse backend is available only on Windows")
-
-    template = _get_template(name)
-    project_path = _get_project_path()
-    context = prepare_search_context(template, autofocus=autofocus)
-    if context is None:
-        return False
-    region = find_on_screen(
-        template,
-        project_path,
-        confidence,
-        search_region=context.region,
-        debug=_vision_debug_enabled(),
-        window_info=context.window,
-    )
+    backend = _validate_backend(backend)
+    region, context = _find_template_with_context(name, confidence, autofocus)
     if region is None:
         return False
 
     # Do not click if another window gained focus after the screenshot.
-    window_id = context.window.get("id")
-    if window_id is not None and get_active_window_info().get("id") != window_id:
+    if not _window_still_active(context):
         return False
 
     px, py = _resolve_position(region, position)
@@ -245,6 +272,240 @@ def click_template(
         pyautogui.mouseDown(button=button)
         pyautogui.mouseUp(button=button)
     return True
+
+
+@pytomator_api(
+    description="Waits until a template appears on screen.",
+    params={"name": "Template name.", "timeout": "Maximum wait in seconds.",
+            "interval": "Delay between searches.", "confidence": "Optional confidence override.",
+            "autofocus": "Focus the associated window before searching."},
+    category="Vision", returns="Matched region or None on timeout.",
+    examples=["region = wait_for_template('ready', timeout=15)"], version="1.0",
+)
+def wait_for_template(name: str, timeout: float = 10, interval: float = 0.2,
+                      confidence: Optional[float] = None, autofocus: Optional[bool] = None):
+    if timeout < 0:
+        raise ValueError("timeout must be non-negative")
+    if interval < 0:
+        raise ValueError("interval must be non-negative")
+    deadline = time.monotonic() + timeout
+    while True:
+        if should_stop():
+            raise ScriptInterrupted()
+        region = find_template(name, confidence, autofocus)
+        if region is not None:
+            return region
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        _sleep_interruptibly(min(interval, remaining))
+
+
+@pytomator_api(
+    description="Waits until a template is no longer visible.",
+    params={"name": "Template name.", "timeout": "Maximum wait in seconds.",
+            "interval": "Delay between searches.", "confidence": "Optional confidence override.",
+            "autofocus": "Focus the associated window before searching."},
+    category="Vision", returns="True if it disappears, False on timeout.",
+    examples=["wait_until_template_disappears('loading')"], version="1.0",
+)
+def wait_until_template_disappears(name: str, timeout: float = 10,
+                                   interval: float = 0.2,
+                                   confidence: Optional[float] = None,
+                                   autofocus: Optional[bool] = None) -> bool:
+    if timeout < 0:
+        raise ValueError("timeout must be non-negative")
+    if interval < 0:
+        raise ValueError("interval must be non-negative")
+    deadline = time.monotonic() + timeout
+    while True:
+        if should_stop():
+            raise ScriptInterrupted()
+        if find_template(name, confidence, autofocus) is None:
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        _sleep_interruptibly(min(interval, remaining))
+
+
+@pytomator_api(
+    description="Checks whether a template is currently visible.",
+    params={"name": "Template name.", "confidence": "Optional confidence override.",
+            "autofocus": "Focus the associated window before searching."},
+    category="Vision", returns="True when visible.", examples=["if template_exists('save'): ..."],
+    version="1.0",
+)
+def template_exists(name: str, confidence: Optional[float] = None,
+                    autofocus: Optional[bool] = None) -> bool:
+    return find_template(name, confidence, autofocus) is not None
+
+
+@pytomator_api(
+    description="Finds all visible occurrences of a template.",
+    params={"name": "Template name.", "confidence": "Optional confidence override.",
+            "autofocus": "Focus the associated window before searching."},
+    category="Vision", returns="List of matching regions.",
+    examples=["items = find_all_templates('checkbox')"], version="1.0",
+)
+def find_all_templates(name: str, confidence: Optional[float] = None,
+                       autofocus: Optional[bool] = None):
+    from pytomator.core.vision.search_context import prepare_search_context
+    from pytomator.core.vision.template_matcher import find_all_on_screen
+
+    template = _get_template(name)
+    context = prepare_search_context(template, autofocus=autofocus)
+    if context is None:
+        return []
+    return find_all_on_screen(
+        template, _get_project_path(), confidence, search_region=context.region
+    )
+
+
+@pytomator_api(
+    description="Waits for the first visible template from a list.",
+    params={"names": "Template names in priority order.", "timeout": "Maximum wait in seconds.",
+            "interval": "Delay between search rounds.", "confidence": "Optional confidence override.",
+            "autofocus": "Focus associated windows before searching."},
+    category="Vision", returns="Tuple (name, region), or None on timeout.",
+    examples=["result = wait_for_any_template(['success', 'error'])"], version="1.0",
+)
+def wait_for_any_template(names, timeout: float = 10, interval: float = 0.2,
+                          confidence: Optional[float] = None,
+                          autofocus: Optional[bool] = None):
+    names = list(names)
+    if not names:
+        raise ValueError("names must not be empty")
+    if timeout < 0:
+        raise ValueError("timeout must be non-negative")
+    if interval < 0:
+        raise ValueError("interval must be non-negative")
+    deadline = time.monotonic() + timeout
+    while True:
+        if should_stop():
+            raise ScriptInterrupted()
+        for name in names:
+            region = find_template(name, confidence, autofocus)
+            if region is not None:
+                return name, region
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        _sleep_interruptibly(min(interval, remaining))
+
+
+@pytomator_api(
+    description="Drags a visible template to absolute screen coordinates.",
+    params={"name": "Template name.", "x": "Absolute destination X.", "y": "Absolute destination Y.",
+            "source_position": "Drag point within the template.", "duration": "Drag duration.",
+            "confidence": "Optional confidence override.", "backend": "standard or directinput.",
+            "autofocus": "Focus the associated window before searching."},
+    category="Vision", returns="True if dragged.", examples=["drag_template_to('card', 500, 300)"],
+    version="1.0",
+)
+def drag_template_to(name: str, x: int, y: int,
+                     source_position: str | tuple[int, int] = "center",
+                     duration: float = 0.5, confidence: Optional[float] = None,
+                     backend: str = "standard", autofocus: Optional[bool] = None) -> bool:
+    backend = _validate_backend(backend)
+    region, context = _find_template_with_context(name, confidence, autofocus)
+    if region is None or not _window_still_active(context):
+        return False
+    _mouse_drag(_resolve_position(region, source_position), (x, y), duration, backend)
+    return True
+
+
+@pytomator_api(
+    description="Drags one visible template onto another.",
+    params={"source": "Source template.", "target": "Target template.",
+            "source_position": "Drag point in source.", "target_position": "Drop point in target.",
+            "duration": "Drag duration.", "confidence": "Optional confidence override.",
+            "backend": "standard or directinput.", "autofocus": "Focus associated windows."},
+    category="Vision", returns="True if both templates were found and dragged.",
+    examples=["drag_template_to_template('file', 'folder')"], version="1.0",
+)
+def drag_template_to_template(source: str, target: str,
+                              source_position: str | tuple[int, int] = "center",
+                              target_position: str | tuple[int, int] = "center",
+                              duration: float = 0.5,
+                              confidence: Optional[float] = None,
+                              backend: str = "standard",
+                              autofocus: Optional[bool] = None) -> bool:
+    backend = _validate_backend(backend)
+    source_region, source_context = _find_template_with_context(
+        source, confidence, autofocus
+    )
+    if source_region is None:
+        return False
+    target_region, target_context = _find_template_with_context(
+        target, confidence, autofocus
+    )
+    if target_region is None or not _window_still_active(target_context):
+        return False
+    source_id = source_context.window.get("id")
+    target_id = target_context.window.get("id")
+    if source_id is not None and target_id is not None and source_id != target_id:
+        return False
+    _mouse_drag(
+        _resolve_position(source_region, source_position),
+        _resolve_position(target_region, target_position),
+        duration, backend,
+    )
+    return True
+
+
+@pytomator_api(
+    description="Clicks at an offset relative to a visible template's top-left corner.",
+    params={"name": "Template name.", "dx": "Horizontal offset.", "dy": "Vertical offset.",
+            "button": "Mouse button.", "confidence": "Optional confidence override.",
+            "backend": "standard or directinput.", "autofocus": "Focus associated window."},
+    category="Vision", returns="True if clicked.",
+    examples=["click_relative_to_template('label_email', 180, 10)"], version="1.0",
+)
+def click_relative_to_template(name: str, dx: int, dy: int,
+                               button: str = "primary",
+                               confidence: Optional[float] = None,
+                               backend: str = "standard",
+                               autofocus: Optional[bool] = None) -> bool:
+    return click_template(
+        name, button=button, confidence=confidence, position=(dx, dy),
+        backend=backend, autofocus=autofocus,
+    )
+
+
+@pytomator_api(
+    description="Scrolls until a template becomes visible or the limit is reached.",
+    params={"name": "Template name.", "direction": "up or down.",
+            "max_scrolls": "Maximum scroll attempts.", "amount": "Units per scroll.",
+            "interval": "Delay after each scroll.", "confidence": "Optional confidence override.",
+            "autofocus": "Focus associated window before searching."},
+    category="Vision", returns="Matched region or None.",
+    examples=["region = scroll_until_template('footer', direction='down')"], version="1.0",
+)
+def scroll_until_template(name: str, direction: str = "down",
+                          max_scrolls: int = 20, amount: int = 3,
+                          interval: float = 0.2,
+                          confidence: Optional[float] = None,
+                          autofocus: Optional[bool] = None):
+    direction = direction.lower()
+    if direction not in {"up", "down"}:
+        raise ValueError("direction must be 'up' or 'down'")
+    if max_scrolls < 0:
+        raise ValueError("max_scrolls must be non-negative")
+    if amount <= 0:
+        raise ValueError("amount must be positive")
+    if interval < 0:
+        raise ValueError("interval must be non-negative")
+    for attempt in range(max_scrolls + 1):
+        if should_stop():
+            raise ScriptInterrupted()
+        region = find_template(name, confidence, autofocus)
+        if region is not None:
+            return region
+        if attempt == max_scrolls:
+            return None
+        pyautogui.scroll(amount if direction == "up" else -amount)
+        _sleep_interruptibly(interval)
 
 
 @pytomator_api(
@@ -269,7 +530,7 @@ def hover_template(
     name: str,
     confidence: Optional[float] = None,
     position: str | tuple[int, int] = "center",
-    autofocus: bool = False,
+    autofocus: Optional[bool] = None,
 ):
     """Find a template and move the mouse to the specified position."""
     from pytomator.core.vision.template_matcher import find_on_screen

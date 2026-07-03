@@ -246,6 +246,7 @@ class TemplateMatcherTests(unittest.TestCase):
         )
 
         self.assertFalse(template.multi_scale_enabled)
+        self.assertFalse(template.autofocus)
         self.assertEqual(template.min_scale, 0.5)
         self.assertEqual(template.max_scale, 3.0)
 
@@ -467,6 +468,67 @@ class ClickTemplateTests(unittest.TestCase):
         directinput.moveTo.assert_called_once_with(20, 20)
         directinput.mouseDown.assert_called_once_with(button="left")
         directinput.mouseUp.assert_called_once_with(button="left")
+
+
+class ExtendedVisionApiTests(unittest.TestCase):
+    @patch("pytomator.core.automator.api.should_stop", return_value=True)
+    def test_wait_for_template_is_interruptible(self, _should_stop):
+        with self.assertRaises(api.ScriptInterrupted):
+            api.wait_for_template("ready", timeout=1)
+
+    @patch("pytomator.core.automator.api.find_template", return_value=None)
+    def test_wait_for_template_returns_none_on_immediate_timeout(self, find):
+        self.assertIsNone(api.wait_for_template("ready", timeout=0))
+        find.assert_called_once()
+
+    @patch("pytomator.core.automator.api._mouse_drag")
+    @patch("pytomator.core.automator.api._window_still_active", return_value=True)
+    @patch("pytomator.core.automator.api._find_template_with_context")
+    def test_drag_uses_template_position_and_absolute_destination(
+        self, find, _still_active, mouse_drag
+    ):
+        find.return_value = ((10, 20, 30, 40), SimpleNamespace())
+
+        dragged = api.drag_template_to(
+            "card", 500, 300, source_position="bottom_right", duration=0.75
+        )
+
+        self.assertTrue(dragged)
+        mouse_drag.assert_called_once_with((39, 59), (500, 300), 0.75, "standard")
+
+    @patch("pytomator.core.automator.api._sleep_interruptibly")
+    @patch("pytomator.core.automator.api.find_template")
+    @patch("pytomator.core.automator.api.pyautogui")
+    def test_scroll_down_stops_when_template_is_found(self, pyautogui, find, _sleep):
+        find.side_effect = [None, None, (1, 2, 3, 4)]
+
+        result = api.scroll_until_template(
+            "footer", direction="down", max_scrolls=4, amount=5
+        )
+
+        self.assertEqual(result, (1, 2, 3, 4))
+        self.assertEqual(pyautogui.scroll.call_args_list, [unittest.mock.call(-5)] * 2)
+
+
+class FindAllTemplateTests(unittest.TestCase):
+    @patch("pytomator.core.vision.template_matcher.capture_region")
+    @patch("pytomator.core.vision.template_matcher.load_template_image")
+    def test_find_all_respects_search_region_coordinates(
+        self, load_template, capture_region
+    ):
+        screen, pattern = TemplateMatcherTests._matching_images()
+        load_template.return_value = pattern
+        capture_region.return_value = screen
+        template = SimpleNamespace(image_path="template.png", confidence=0.99)
+
+        matches = template_matcher.find_all_on_screen(
+            template,
+            Path("."),
+            search_region={"left": -800, "top": 100, "width": 40, "height": 30},
+        )
+
+        self.assertIn((-788, 108, 10, 8), matches)
+        capture_region.assert_called_once_with(-800, 100, 40, 30)
 
 
 if __name__ == "__main__":

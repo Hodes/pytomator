@@ -36,6 +36,10 @@ class TemplateCapture(BaseModel):
     active_window_title: Optional[str] = Field(
         default=None, description="Title of the active window at capture time"
     )
+    autofocus: bool = Field(
+        default=False,
+        description="Whether to focus the captured window before template matching",
+    )
     confidence: float = Field(
         default=0.85,
         ge=0.0,
