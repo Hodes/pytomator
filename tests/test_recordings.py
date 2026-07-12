@@ -14,12 +14,65 @@ from pytomator.project.models import Project, Recording, RecordingItem
 from pytomator.project.storage import ProjectStorage
 from pytomator.project.manager import ProjectManager
 from pytomator.ui.recordings_frame import RecordingsFrame
+from pytomator.ui.recording_timeline import TimelinePresenter, EXECUTING_ROLE
 from pytomator.core.recording.recorder import InputRecorder
 from pytomator.core.recording.mouse_path import simplify_mouse_run, interpolate_position
 from pytomator.core.automator import api as automator_api
+from pytomator.core.recording import physical_keyboard
 
 
 class RecordingModelTests(unittest.TestCase):
+    class FakeKey:
+        def __init__(self, value, vk=None): self.value = value; self.vk = vk
+        def __str__(self): return self.value
+
+    def test_modifier_snapshots_preserve_ctrl_c_and_ignore_unmatched_release(self):
+        captured = []; recorder = InputRecorder(captured.append, excluded_hotkeys=["ctrl+shift+f8"]); recorder._ignore_until = 0
+        with patch("pytomator.core.recording.recorder.physical_metadata", return_value={"vk": 1, "scan_code": 2, "layout": "test"}):
+            recorder._key("key_up", self.FakeKey("Key.shift"))
+            recorder._key("key_down", self.FakeKey("Key.ctrl_l"))
+            recorder._key("key_down", self.FakeKey("c"))
+            recorder._key("key_up", self.FakeKey("c"))
+            recorder._key("key_up", self.FakeKey("Key.ctrl_l"))
+        self.assertEqual([item.data["modifiers"] for item in captured], [["ctrl"], ["ctrl"], ["ctrl"], []])
+        self.assertEqual([item.data["key"] for item in captured], ["ctrl_l", "c", "c", "ctrl_l"])
+
+    def test_metadata_failure_does_not_stop_keyboard_capture(self):
+        captured = []; recorder = InputRecorder(captured.append); recorder._ignore_until = 0
+        with patch("pytomator.core.recording.recorder.physical_metadata", side_effect=TypeError("metadata")):
+            recorder._key("key_down", self.FakeKey("a"))
+            recorder._key("key_up", self.FakeKey("a"))
+        self.assertEqual([item.type for item in captured], ["key_down", "key_up"])
+        self.assertEqual(captured[0].data["key"], "a")
+
+    def test_altgr_snapshot_does_not_duplicate_ctrl_alt(self):
+        recorder = InputRecorder(lambda _: None); recorder._pressed = {"ctrl", "alt", "altgr"}
+        self.assertEqual(recorder._logical_modifiers(), ["altgr"])
+
+    def test_only_exact_recording_hotkey_is_filtered(self):
+        captured = []; recorder = InputRecorder(captured.append, excluded_hotkeys=["ctrl+shift+f8"]); recorder._ignore_until = 0
+        with patch("pytomator.core.recording.recorder.physical_metadata", return_value={}):
+            for value in ("Key.alt", "Key.ctrl_l", "Key.shift", "Key.f8"):
+                recorder._key("key_down", self.FakeKey(value))
+            for value in ("Key.f8", "Key.shift", "Key.ctrl_l", "Key.alt"):
+                recorder._key("key_up", self.FakeKey(value))
+        self.assertEqual(len(captured), 8)
+
+    def test_timeline_presenter_formats_comment_and_mouse_group(self):
+        comment = RecordingItem(type="comment", timestamp=.5, data={"text": "Section"})
+        moves = [
+            RecordingItem(type="mouse_move", timestamp=1, data={"x": 10, "y": 20}),
+            RecordingItem(type="mouse_move", timestamp=1.2, data={"x": 30, "y": 40}),
+        ]
+        presenter = TimelinePresenter(); rows = presenter.build([comment, *moves], set())
+        self.assertEqual(rows[0].kind, "comment")
+        self.assertEqual(rows[0].parameters, "Section")
+        self.assertEqual(rows[1].kind, "mouse_group")
+        self.assertIn("2 keyframes", rows[1].parameters)
+        self.assertEqual(rows[1].item_ids, [moves[0].id, moves[1].id])
+        expanded = presenter.build([comment, *moves], {rows[1].group_key})
+        self.assertEqual(len(expanded), 4)
+
     def test_recording_changes_mark_project_dirty_and_save_clears_it(self):
         manager = ProjectManager()
         manager.create_project("demo")
@@ -65,6 +118,37 @@ class RecordingModelTests(unittest.TestCase):
         self.assertIn("wait(1)", code)
         compile(code, "<generated>", "exec")
 
+    def test_script_generator_compacts_simple_hotkey(self):
+        events = [
+            RecordingItem(type="key_down", timestamp=0, data={"key": "ctrl_l"}),
+            RecordingItem(type="key_down", timestamp=.02, data={"key": "c"}),
+            RecordingItem(type="key_up", timestamp=.04, data={"key": "c"}),
+            RecordingItem(type="key_up", timestamp=.06, data={"key": "ctrl_l"}),
+        ]
+        code = RecordingScriptGenerator().generate(Recording(name="copy", items=events))
+        self.assertIn("hotkey('ctrl', 'c')", code)
+
+    def test_script_generator_uses_physical_api_for_special_key(self):
+        event = RecordingItem(type="key_down", data={"key": "ç", "vk": 186, "scan_code": 39, "extended": False})
+        code = RecordingScriptGenerator().generate(Recording(name="special", items=[event]))
+        self.assertIn("key_down_physical(scan_code=39, vk=186", code)
+
+    def test_hotkey_releases_remaining_modifiers_after_release_error(self):
+        with patch.object(automator_api, "key_down") as down, \
+             patch.object(automator_api, "key_up", side_effect=[RuntimeError("release"), None]) as up:
+            with self.assertRaises(RuntimeError): automator_api.hotkey("ctrl", "c")
+        self.assertEqual(down.call_count, 2)
+        self.assertEqual(up.call_count, 2)
+
+    @unittest.skipUnless(physical_keyboard.sys.platform == "win32", "Windows physical keyboard only")
+    def test_physical_key_flags_include_scan_extended_and_keyup(self):
+        flags = physical_keyboard.physical_key_flags(scan_code=72, extended=True, key_up=True)
+        self.assertTrue(flags & physical_keyboard.KEYEVENTF_SCANCODE)
+        self.assertTrue(flags & physical_keyboard.KEYEVENTF_EXTENDEDKEY)
+        self.assertTrue(flags & physical_keyboard.KEYEVENTF_KEYUP)
+        expected_size = 40 if physical_keyboard.ctypes.sizeof(physical_keyboard.ctypes.c_void_p) == 8 else 28
+        self.assertEqual(physical_keyboard.ctypes.sizeof(physical_keyboard.INPUT), expected_size)
+
     def test_mouse_path_preserves_square_corners_and_timestamps(self):
         points = [(0, 0), (50, 0), (100, 0), (100, 50), (100, 100),
                   (50, 100), (0, 100), (0, 50), (0, 0)]
@@ -92,6 +176,15 @@ class RecordingModelTests(unittest.TestCase):
 
 
 class RecordingPlayerTests(unittest.TestCase):
+    def test_player_uses_physical_keyboard_metadata_not_modifier_snapshot(self):
+        player = RecordingPlayer()
+        item = RecordingItem(type="key_down", data={"key": "ç", "vk": 186, "scan_code": 39,
+                                                      "extended": False, "modifiers": ["shift"]})
+        with patch("pytomator.core.recording.player.api.key_down_physical") as physical, \
+             patch("pytomator.core.recording.player.api.key_down") as textual:
+            player._execute_item(item, 1)
+        physical.assert_called_once_with(39, 186, False)
+        textual.assert_not_called()
     def test_global_input_state_release_is_idempotent(self):
         automator_api._pressed_keys.add("ctrl")
         automator_api._pressed_mouse_buttons.add(("primary", "standard"))
@@ -203,6 +296,60 @@ class RecordingsFrameCaptureSessionTests(unittest.TestCase):
         self.assertIsNone(self.frame.recorder)
         recorder.stop.assert_called_once()
         self.runner.stop.assert_called_once()
+
+    def test_execution_indicator_does_not_change_selection(self):
+        first = RecordingItem(type="comment", data={"text": "one"})
+        second = RecordingItem(type="wait", timestamp=1, data={"duration": 1})
+        self.recording.items = [first, second]; self.frame.refresh()
+        self.frame.table.selectRow(0)
+        self.frame._set_execution_indicator(second.id, scroll=False)
+        self.assertEqual(self.frame.table.currentRow(), 0)
+        self.assertTrue(self.frame.table.item(1, 0).data(EXECUTING_ROLE))
+        self.assertFalse(bool(self.frame.table.item(0, 0).data(EXECUTING_ROLE)))
+
+    def test_player_errors_are_forwarded_through_qt_signal(self):
+        received = []
+        self.frame.playback_error.connect(received.append)
+        with patch("pytomator.ui.recordings_frame.QMessageBox.critical"):
+            self.frame.player.emit("error", "playback failed")
+        self.assertEqual(received, ["playback failed"])
+
+    def test_comment_is_inserted_before_selected_regular_item(self):
+        wait = RecordingItem(type="wait", timestamp=2, data={"duration": 1})
+        self.recording.items = [wait]; self.frame.refresh(); self.frame.table.selectRow(0)
+        self.frame._insert_comment("before")
+        self.assertEqual([item.type for item in self.recording.items], ["comment", "wait"])
+        self.assertEqual(self.recording.items[0].timestamp, wait.timestamp)
+
+    def test_comment_is_inserted_before_selected_mouse_group(self):
+        moves = [
+            RecordingItem(type="mouse_move", timestamp=1, data={"x": 1, "y": 1}),
+            RecordingItem(type="mouse_move", timestamp=2, data={"x": 2, "y": 2}),
+        ]
+        move_ids = [item.id for item in moves]
+        self.recording.items = moves; self.frame.refresh(); self.frame.table.selectRow(0)
+        self.frame._insert_comment("path")
+        self.assertEqual(self.recording.items[0].type, "comment")
+        self.assertEqual([item.id for item in self.recording.items[1:]], move_ids)
+
+    def test_comment_is_inserted_before_selected_expanded_keyframe(self):
+        moves = [
+            RecordingItem(type="mouse_move", timestamp=1, data={"x": 1, "y": 1}),
+            RecordingItem(type="mouse_move", timestamp=2, data={"x": 2, "y": 2}),
+        ]
+        self.recording.items = moves; self.frame.refresh()
+        group_key = self.frame._timeline_rows[0].group_key
+        self.frame._expanded_mouse_groups.add(group_key); self.frame._render_timeline(self.recording)
+        self.frame.table.selectRow(2)  # group, first child, second child
+        self.frame._insert_comment("keyframe")
+        self.assertEqual([item.type for item in self.recording.items], ["mouse_move", "comment", "mouse_move"])
+        self.assertEqual(self.recording.items[1].timestamp, moves[1].timestamp)
+
+    def test_comment_without_selection_is_appended(self):
+        wait = RecordingItem(type="wait", timestamp=2, data={"duration": 1})
+        self.recording.items = [wait]; self.frame.refresh(); self.frame.table.clearSelection()
+        self.frame._insert_comment("last")
+        self.assertEqual([item.type for item in self.recording.items], ["wait", "comment"])
 
 
 if __name__ == "__main__":

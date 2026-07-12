@@ -9,7 +9,8 @@ from pytomator.core.automator import api as automator_api  # populate registry
 
 ALLOWED_API_COMMANDS = {
     "wait", "click", "click_hold", "clicks", "hold", "press", "write",
-    "key_down", "key_up", "mouse_down", "mouse_up", "move_to", "scroll",
+    "key_down", "key_up", "key_down_physical", "key_up_physical", "hotkey",
+    "mouse_down", "mouse_up", "move_to", "scroll",
 }
 
 

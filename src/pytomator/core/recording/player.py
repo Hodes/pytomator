@@ -3,6 +3,7 @@
 import threading
 import time
 import logging
+import sys
 
 from pytomator.core.events import EventEmitter
 from pytomator.core.global_interruption_controller import GlobalInterruptionController
@@ -146,6 +147,7 @@ class RecordingPlayer(EventEmitter):
                     if not self._wait_until(time.monotonic() + recording.cycle_interval / recording.speed):
                         return
         except Exception as exc:
+            logging.getLogger(__name__).exception("Recording playback failed")
             self.emit("error", str(exc))
         finally:
             self._release_inputs()
@@ -212,9 +214,15 @@ class RecordingPlayer(EventEmitter):
         if item.type == "wait":
             self._wait_until(time.monotonic() + float(data.get("duration", 0)) / speed)
         elif item.type == "key_down":
-            api.key_down(data["key"]); self._keys.add(data["key"])
+            if sys.platform == "win32" and (data.get("scan_code") or data.get("vk") is not None):
+                api.key_down_physical(data.get("scan_code"), data.get("vk"), data.get("extended", False))
+            else:
+                api.key_down(data["key"]); self._keys.add(data["key"])
         elif item.type == "key_up":
-            api.key_up(data["key"]); self._keys.discard(data["key"])
+            if sys.platform == "win32" and (data.get("scan_code") or data.get("vk") is not None):
+                api.key_up_physical(data.get("scan_code"), data.get("vk"), data.get("extended", False))
+            else:
+                api.key_up(data["key"]); self._keys.discard(data["key"])
         elif item.type == "mouse_move":
             api.move_to(data["x"], data["y"], duration=float(data.get("duration", 0)) / speed)
         elif item.type == "mouse_button_down":

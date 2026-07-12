@@ -1,10 +1,12 @@
 """Global keyboard/mouse capture adapter built on pynput."""
 
 import math
+import logging
 import time
 from typing import Callable
 
 from pytomator.project.models import RecordingItem
+from .physical_keyboard import physical_metadata
 
 
 class InputRecorder:
@@ -49,7 +51,7 @@ class InputRecorder:
     def _normalize_key(key: str) -> str:
         aliases = {"ctrl_l": "ctrl", "ctrl_r": "ctrl", "control": "ctrl",
                    "shift_l": "shift", "shift_r": "shift",
-                   "alt_l": "alt", "alt_r": "alt", "alt_gr": "alt",
+                   "alt_l": "alt", "alt_r": "alt", "alt_gr": "altgr",
                    "cmd": "win", "cmd_l": "win", "cmd_r": "win"}
         return aliases.get(key.lower(), key.lower())
 
@@ -61,12 +63,13 @@ class InputRecorder:
         if time.monotonic() < self._ignore_until:
             return
         raw = self._key_name(key); normalized = self._normalize_key(raw)
-        item = RecordingItem(type=kind, timestamp=self._time(), data={"key": raw})
+        was_pressed = normalized in self._pressed
         if kind == "key_down":
             self._pressed.add(normalized)
-            if any(normalized in chord or self._pressed.issubset(chord) for chord in self._excluded_chords):
+            item = self._keyboard_item(kind, raw, key)
+            if any(self._pressed.issubset(chord) for chord in self._excluded_chords):
                 self._buffered_keys.append(item)
-                matched = next((chord for chord in self._excluded_chords if chord.issubset(self._pressed)), None)
+                matched = next((chord for chord in self._excluded_chords if chord == self._pressed), None)
                 if matched:
                     self._suppressed_keys.update(matched)
                     self._buffered_keys.clear()
@@ -77,7 +80,27 @@ class InputRecorder:
         if normalized in self._suppressed_keys:
             self._suppressed_keys.discard(normalized)
             return
+        if not was_pressed:
+            return
+        item = self._keyboard_item(kind, raw, key)
         self._flush_buffer(); self.callback(item)
+
+    def _keyboard_item(self, kind, raw, key):
+        try:
+            metadata = physical_metadata(key)
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "Failed to collect physical keyboard metadata; recording textual fallback"
+            )
+            metadata = {}
+        data = {"key": raw, **metadata, "modifiers": self._logical_modifiers()}
+        return RecordingItem(type=kind, timestamp=self._time(), data=data)
+
+    def _logical_modifiers(self):
+        modifiers = [value for value in ("ctrl", "shift", "alt", "altgr", "win") if value in self._pressed]
+        if "altgr" in modifiers:
+            modifiers = [value for value in modifiers if value not in {"ctrl", "alt"}]
+        return modifiers
 
     def _flush_buffer(self):
         for item in self._buffered_keys:

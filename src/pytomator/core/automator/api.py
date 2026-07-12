@@ -26,6 +26,7 @@ _import_cache: dict[str, "_ScriptNamespace"] = {}
 _input_state_lock = threading.RLock()
 _pressed_keys: set[str] = set()
 _pressed_mouse_buttons: set[tuple[str, Optional[str]]] = set()
+_pressed_physical_keys: dict[str, dict] = {}
 
 
 class _ScriptNamespace:
@@ -982,12 +983,52 @@ def key_up(key):
     with _input_state_lock:
         _pressed_keys.discard(str(key))
 
+@pytomator_api(description="Presses a physical keyboard key by scan code or virtual key.",
+    params={"scan_code": "Physical scan code.", "vk": "Optional Windows virtual key.", "extended": "Extended-key flag."},
+    category="Keyboard", version="1.1")
+def key_down_physical(scan_code: int | None = None, vk: int | None = None, extended: bool = False):
+    from pytomator.core.recording.physical_keyboard import send_physical_key
+    send_physical_key(scan_code=scan_code, vk=vk, extended=extended, key_up=False)
+    token = f"{scan_code}:{vk}:{int(extended)}"
+    with _input_state_lock:
+        _pressed_physical_keys[token] = {"scan_code": scan_code, "vk": vk, "extended": extended}
+
+@pytomator_api(description="Releases a physical keyboard key by scan code or virtual key.",
+    params={"scan_code": "Physical scan code.", "vk": "Optional Windows virtual key.", "extended": "Extended-key flag."},
+    category="Keyboard", version="1.1")
+def key_up_physical(scan_code: int | None = None, vk: int | None = None, extended: bool = False):
+    from pytomator.core.recording.physical_keyboard import send_physical_key
+    send_physical_key(scan_code=scan_code, vk=vk, extended=extended, key_up=True)
+    token = f"{scan_code}:{vk}:{int(extended)}"
+    with _input_state_lock:
+        _pressed_physical_keys.pop(token, None)
+
+@pytomator_api(description="Presses a keyboard chord and safely releases it in reverse order.",
+    params={"keys": "Keys in modifier-to-main-key order."}, category="Keyboard", version="1.1")
+def hotkey(*keys):
+    pressed = []
+    error = None
+    try:
+        for key in keys:
+            key_down(key); pressed.append(key)
+    except Exception as exc:
+        error = exc
+    finally:
+        for key in reversed(pressed):
+            try:
+                key_up(key)
+            except Exception as exc:
+                error = error or exc
+        if error:
+            raise error
+
 
 def release_all_inputs():
     """Release every input currently held through the Pytomator API."""
     with _input_state_lock:
         keys = tuple(_pressed_keys)
         buttons = tuple(_pressed_mouse_buttons)
+        physical_keys = tuple(_pressed_physical_keys.values())
     for key in keys:
         try:
             key_up(key)
@@ -1000,6 +1041,13 @@ def release_all_inputs():
         except Exception:
             with _input_state_lock:
                 _pressed_mouse_buttons.discard((button, backend))
+    for metadata in physical_keys:
+        try:
+            key_up_physical(**metadata)
+        except Exception:
+            token = f"{metadata.get('scan_code')}:{metadata.get('vk')}:{int(metadata.get('extended', False))}"
+            with _input_state_lock:
+                _pressed_physical_keys.pop(token, None)
 
 @pytomator_api(
     description="Presses a key. It chooses between pydirectinput and pyautogui based on the platform and settings.",
