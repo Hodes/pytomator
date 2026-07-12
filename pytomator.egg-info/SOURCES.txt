@@ -23,11 +23,18 @@ src/pytomator/core/script_interrupted.py
 src/pytomator/core/script_runner.py
 src/pytomator/core/automator/__init__.py
 src/pytomator/core/automator/api.py
+src/pytomator/core/recording/__init__.py
+src/pytomator/core/recording/command_catalog.py
+src/pytomator/core/recording/player.py
+src/pytomator/core/recording/recorder.py
+src/pytomator/core/recording/script_generator.py
 src/pytomator/core/vision/__init__.py
 src/pytomator/core/vision/capture_tool.py
 src/pytomator/core/vision/models.py
 src/pytomator/core/vision/search_context.py
 src/pytomator/core/vision/template_matcher.py
+src/pytomator/core/vision/template_matcher_registry.py
+src/pytomator/core/vision/template_matcher_service.py
 src/pytomator/core/windows/__init__.py
 src/pytomator/core/windows/factory.py
 src/pytomator/core/windows/window_controller.py
@@ -44,6 +51,7 @@ src/pytomator/ui/api_doc_generator.py
 src/pytomator/ui/editor_frame.py
 src/pytomator/ui/main_window.py
 src/pytomator/ui/project_frame.py
+src/pytomator/ui/recordings_frame.py
 src/pytomator/ui/settings_frame.py
 src/pytomator/ui/templates_frame.py
 src/pytomator/ui/capture/__init__.py

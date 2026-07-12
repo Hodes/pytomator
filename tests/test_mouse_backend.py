@@ -100,7 +100,23 @@ class SmoothMouseMovementTests(unittest.TestCase):
         with patch.object(api, "_mouse_for_backend", return_value=(mouse, "standard")):
             api._move_mouse_to((20, 30), duration=0, easing="linear")
 
-        mouse.moveTo.assert_called_once_with(20, 30)
+        mouse.moveTo.assert_called_once_with(20, 30, _pause=False)
+
+    def test_zero_duration_directinput_uses_relative_delta(self):
+        mouse = MagicMock()
+        mouse.position.side_effect = [(5, 7), (20, 30)]
+        with patch.object(api, "_mouse_for_backend", return_value=(mouse, "directinput")):
+            api._move_mouse_to((20, 30), duration=0, easing="linear")
+
+        mouse.moveRel.assert_called_once_with(15, 23, relative=True, _pause=False)
+        mouse.moveTo.assert_not_called()
+
+    def test_public_move_to_uses_shared_backend_movement(self):
+        with patch.object(api, "_move_mouse_to") as move:
+            api.move_to(20, 30, duration=0.2, backend="directinput")
+        move.assert_called_once_with(
+            (20, 30), backend="directinput", duration=0.2, easing="linear"
+        )
 
     @patch("pytomator.core.automator.api.time.sleep")
     def test_standard_backend_emits_multiple_absolute_positions(self, _sleep):
@@ -123,7 +139,7 @@ class SmoothMouseMovementTests(unittest.TestCase):
         self.assertGreaterEqual(mouse.moveRel.call_count, 2)
         for call in mouse.moveRel.call_args_list:
             self.assertTrue(call.kwargs["relative"])
-        mouse.moveTo.assert_called_once_with(20, 30)
+        mouse.moveTo.assert_called_once_with(20, 30, _pause=False)
 
     def test_movement_can_be_interrupted(self):
         mouse = MagicMock()

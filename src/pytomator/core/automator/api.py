@@ -1,5 +1,6 @@
 import sys
 import time
+import threading
 from math import ceil
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
@@ -22,6 +23,9 @@ if use_direct_input_keys:
 # ── Registry for ProjectManager (set by MainWindow) ──
 _project_manager: "ProjectManager | None" = None
 _import_cache: dict[str, "_ScriptNamespace"] = {}
+_input_state_lock = threading.RLock()
+_pressed_keys: set[str] = set()
+_pressed_mouse_buttons: set[tuple[str, Optional[str]]] = set()
 
 
 class _ScriptNamespace:
@@ -195,7 +199,17 @@ def _move_mouse_to(
     positions = _interpolate_mouse_positions(start, destination, duration, easing)
 
     if len(positions) == 1:
-        mouse.moveTo(*destination)
+        if resolved_backend == "directinput":
+            mouse.moveRel(
+                destination[0] - start[0],
+                destination[1] - start[1],
+                relative=True,
+                _pause=False,
+            )
+            if tuple(mouse.position()) != destination:
+                mouse.moveTo(*destination, _pause=False)
+        else:
+            mouse.moveTo(*destination, _pause=False)
         return
 
     interval = duration / len(positions)
@@ -206,14 +220,14 @@ def _move_mouse_to(
         if resolved_backend == "directinput":
             delta_x = position[0] - emitted[0]
             delta_y = position[1] - emitted[1]
-            mouse.moveRel(delta_x, delta_y, relative=True)
+            mouse.moveRel(delta_x, delta_y, relative=True, _pause=False)
         else:
-            mouse.moveTo(*position)
+            mouse.moveTo(*position, _pause=False)
         emitted = position
         if index < len(positions) - 1:
             time.sleep(interval)
     if resolved_backend == "directinput" and tuple(mouse.position()) != destination:
-        mouse.moveTo(*destination)
+        mouse.moveTo(*destination, _pause=False)
 
 
 def _find_template_with_context(name, confidence=None, autofocus=None):
@@ -833,6 +847,42 @@ def click(button="primary", x=None, y=None, backend: Optional[str] = None):
         mouse.click(button=button)
     else:
         mouse.click(x, y, button=button)
+
+@pytomator_api(description="Moves the mouse pointer to an absolute screen position.",
+    params={"x": "X coordinate.", "y": "Y coordinate.", "duration": "Movement duration.", "backend": "Optional backend."},
+    category="Mouse", version="1.1")
+def move_to(x, y, duration=0.0, backend: Optional[str] = None):
+    _move_mouse_to(
+        (int(x), int(y)),
+        backend=backend,
+        duration=float(duration),
+        easing="linear",
+    )
+
+@pytomator_api(description="Presses and holds a mouse button.",
+    params={"button": "Mouse button.", "x": "Optional X.", "y": "Optional Y.", "backend": "Optional backend."}, category="Mouse", version="1.1")
+def mouse_down(button="primary", x=None, y=None, backend: Optional[str] = None):
+    mouse, resolved = _mouse_for_backend(backend)
+    mouse.mouseDown(x, y, button=_backend_button(button, resolved), _pause=False)
+    with _input_state_lock:
+        _pressed_mouse_buttons.add((button, resolved))
+
+@pytomator_api(description="Releases a mouse button.",
+    params={"button": "Mouse button.", "x": "Optional X.", "y": "Optional Y.", "backend": "Optional backend."}, category="Mouse", version="1.1")
+def mouse_up(button="primary", x=None, y=None, backend: Optional[str] = None):
+    mouse, resolved = _mouse_for_backend(backend)
+    mouse.mouseUp(x, y, button=_backend_button(button, resolved), _pause=False)
+    with _input_state_lock:
+        _pressed_mouse_buttons.discard((button, resolved))
+
+@pytomator_api(description="Scrolls vertically and optionally horizontally.",
+    params={"dy": "Vertical amount.", "dx": "Horizontal amount.", "backend": "Optional backend."}, category="Mouse", version="1.1")
+def scroll(dy, dx=0, backend: Optional[str] = None):
+    mouse, _ = _mouse_for_backend(backend)
+    scroll_mouse = mouse if hasattr(mouse, "scroll") else pyautogui
+    if dx and hasattr(scroll_mouse, "hscroll"):
+        scroll_mouse.hscroll(dx, _pause=False)
+    scroll_mouse.scroll(dy, _pause=False)
         
 @pytomator_api(
     description=
@@ -913,6 +963,43 @@ def hold(key, duration=1):
     pyautogui.keyDown(key)
     wait(duration)
     pyautogui.keyUp(key)
+
+@pytomator_api(description="Presses and holds a keyboard key.", params={"key": "Key name."}, category="Keyboard", version="1.1")
+def key_down(key):
+    if use_direct_input_keys:
+        pydirectinput.keyDown(key, _pause=False)
+    else:
+        pyautogui.keyDown(key, _pause=False)
+    with _input_state_lock:
+        _pressed_keys.add(str(key))
+
+@pytomator_api(description="Releases a keyboard key.", params={"key": "Key name."}, category="Keyboard", version="1.1")
+def key_up(key):
+    if use_direct_input_keys:
+        pydirectinput.keyUp(key, _pause=False)
+    else:
+        pyautogui.keyUp(key, _pause=False)
+    with _input_state_lock:
+        _pressed_keys.discard(str(key))
+
+
+def release_all_inputs():
+    """Release every input currently held through the Pytomator API."""
+    with _input_state_lock:
+        keys = tuple(_pressed_keys)
+        buttons = tuple(_pressed_mouse_buttons)
+    for key in keys:
+        try:
+            key_up(key)
+        except Exception:
+            with _input_state_lock:
+                _pressed_keys.discard(key)
+    for button, backend in buttons:
+        try:
+            mouse_up(button, backend=backend)
+        except Exception:
+            with _input_state_lock:
+                _pressed_mouse_buttons.discard((button, backend))
 
 @pytomator_api(
     description="Presses a key. It chooses between pydirectinput and pyautogui based on the platform and settings.",

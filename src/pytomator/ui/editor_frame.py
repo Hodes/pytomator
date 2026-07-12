@@ -25,12 +25,16 @@ class EditorFrame(QWidget):
     _run_script_hotkey_signal = pyqtSignal(str)  # Emitted from hotkey thread, handled on main thread
     _toggle_script_signal = pyqtSignal()          # Thread-safe toggle for global hotkey
     _capture_region_signal = pyqtSignal()         # Thread-safe trigger for capture region hotkey
+    _toggle_recording_signal = pyqtSignal()
+    _run_recording_hotkey_signal = pyqtSignal(str)
 
     def __init__(self, script_runner, project_manager: ProjectManager):
         super().__init__()
 
         self.project_manager = project_manager
         self.current_script_name = None  # Name of the script currently in the editor
+        self._reported_hotkey_fallbacks = set()
+        self.before_script_start = None
 
         # ── Script selector ─────────────────────────────────────
         selector_layout = QHBoxLayout()
@@ -147,6 +151,9 @@ class EditorFrame(QWidget):
         self.project_manager.on("script_renamed", self._on_project_changed)
         self.project_manager.on("active_script_changed", self._on_active_script_changed)
         self.project_manager.on("script_hotkey_changed", self._on_script_hotkey_changed)
+        self.project_manager.on("recording_added", self._on_project_changed)
+        self.project_manager.on("recording_removed", self._on_project_changed)
+        self.project_manager.on("recording_changed", self._on_project_changed)
 
         self._refresh_script_list()
 
@@ -413,6 +420,12 @@ class EditorFrame(QWidget):
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to register capture hotkey '{capture_region_key}':\n{e}")
 
+        recording_key = hotkey_cfg.get("toggle_recording", "ctrl+shift+f8")
+        try:
+            self.hotkeys.register("toggle_recording", recording_key.lower(), self._toggle_recording_signal.emit)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to register recording hotkey '{recording_key}':\n{e}")
+
         # 3. Per-script hotkeys
         if self.project_manager.is_project_open:
             for script in self.project_manager.list_scripts():
@@ -428,6 +441,21 @@ class EditorFrame(QWidget):
                             self, "Error",
                             f"Failed to register hotkey '{script.hotkey}' for script '{script.name}':\n{e}"
                         )
+            for recording in self.project_manager.list_recordings():
+                if recording.hotkey:
+                    try:
+                        self.hotkeys.register(f"recording_{recording.id}", recording.hotkey.lower(), lambda rid=recording.id: self._run_recording_hotkey_signal.emit(rid))
+                    except Exception as e:
+                        QMessageBox.critical(self, "Error", f"Failed to register recording hotkey '{recording.hotkey}':\n{e}")
+        new_fallbacks = self.hotkeys.fallback_actions - self._reported_hotkey_fallbacks
+        if new_fallbacks:
+            QMessageBox.warning(
+                self, "Global Hotkey Fallback",
+                "Some hotkeys could not be registered natively and are using a keyboard hook. "
+                "They may not work in elevated or exclusive-input games:\n\n"
+                + "\n".join(sorted(new_fallbacks)),
+            )
+        self._reported_hotkey_fallbacks = set(self.hotkeys.fallback_actions)
 
     def _make_script_callback(self, script_name: str):
         """Create a callback that emits a signal to run a script on the main thread."""
@@ -478,6 +506,8 @@ class EditorFrame(QWidget):
         if self.runner._running:
             self.runner.stop()
         else:
+            if self.before_script_start and not self.before_script_start():
+                return
             # Auto-save before running
             if self.project_manager.is_project_open and self.project_manager.project.settings.auto_save:
                 self._save_current_code()

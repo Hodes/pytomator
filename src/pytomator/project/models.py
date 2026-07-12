@@ -1,7 +1,8 @@
 """Pydantic models for Project, Script, ProjectSettings, and TemplateCapture."""
 
 from datetime import datetime
-from typing import List, Literal, Optional
+from typing import Any, List, Literal, Optional
+from uuid import uuid4
 from pydantic import BaseModel, Field
 
 from pytomator.core.vision.models import TemplateCapture
@@ -19,6 +20,51 @@ class Script(BaseModel):
 
     class Config:
         frozen = False  # Allow mutation at runtime
+
+
+RecordingItemType = Literal[
+    "key_down", "key_up", "mouse_move", "mouse_button_down",
+    "mouse_button_up", "mouse_scroll", "wait", "comment", "api_call",
+]
+
+
+class RecordingItem(BaseModel):
+    """One captured or manually authored item on a recording timeline."""
+
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    type: RecordingItemType
+    timestamp: float = Field(default=0.0, ge=0.0)
+    data: dict[str, Any] = Field(default_factory=dict)
+
+    @property
+    def duration(self) -> float:
+        return max(0.0, float(self.data.get("duration", 0.0))) if self.type == "wait" else 0.0
+
+
+class MonitorContext(BaseModel):
+    x: int = 0
+    y: int = 0
+    width: int
+    height: int
+    name: str = ""
+
+
+class Recording(BaseModel):
+    """An editable, replayable sequence of input events and commands."""
+
+    id: str = Field(default_factory=lambda: uuid4().hex)
+    name: str
+    description: str = ""
+    hotkey: Optional[str] = None
+    speed: float = Field(default=1.0, gt=0.0, le=10.0)
+    repetitions: int = Field(default=1, ge=1, le=100000)
+    loop: bool = False
+    cycle_interval: float = Field(default=0.0, ge=0.0)
+    monitors: list[MonitorContext] = Field(default_factory=list)
+    items: list[RecordingItem] = Field(default_factory=list)
+
+    def sorted_items(self) -> list[RecordingItem]:
+        return sorted(self.items, key=lambda item: item.timestamp)
 
 
 class ProjectSettings(BaseModel):
@@ -61,6 +107,7 @@ class Project(BaseModel):
 
     # Content
     scripts: List[Script] = Field(default_factory=list, description="List of scripts in the project")
+    recordings: List[Recording] = Field(default_factory=list, description="Recorded action sequences")
     templates: List[TemplateCapture] = Field(default_factory=list, description="List of template captures in the project")
     settings: ProjectSettings = Field(default_factory=ProjectSettings, description="Project settings")
     current_script_name: Optional[str] = Field(default=None, description="Name of the last active script")
@@ -134,6 +181,25 @@ class Project(BaseModel):
         if script is None:
             return False
         script.code = code
+        self.updated_at = datetime.now()
+        return True
+
+    def get_recording(self, recording_id_or_name: str) -> Optional[Recording]:
+        return next((r for r in self.recordings if r.id == recording_id_or_name or r.name == recording_id_or_name), None)
+
+    def add_recording(self, name: str) -> Recording:
+        if self.get_recording(name):
+            raise ValueError(f"Recording '{name}' already exists")
+        recording = Recording(name=name)
+        self.recordings.append(recording)
+        self.updated_at = datetime.now()
+        return recording
+
+    def remove_recording(self, recording_id: str) -> bool:
+        recording = self.get_recording(recording_id)
+        if recording is None:
+            return False
+        self.recordings.remove(recording)
         self.updated_at = datetime.now()
         return True
 

@@ -15,6 +15,7 @@ from pytomator.ui.project_frame import ProjectFrame
 from pytomator.core.script_runner import ScriptRunner
 from pytomator.ui.settings_frame import SettingsFrame
 from pytomator.ui.templates_frame import TemplatesFrame
+from pytomator.ui.recordings_frame import RecordingsFrame
 from pytomator.ui.capture.capture_manager import CaptureManager
 from pytomator.project.manager import ProjectManager
 from pytomator.core.automator import api as automator_api
@@ -36,6 +37,22 @@ APP_STATES = {
         "animation": True,
         "bgcolor": "#e9f8c1",
         "border": "#0b5809"
+    },
+    "recording": {
+        "title": "Recording",
+        "icon": "fa6s.circle",
+        "color": QColor("#c1121f"),
+        "animation": False,
+        "bgcolor": "#ffd6d9",
+        "border": "#c1121f"
+    },
+    "paused": {
+        "title": "Paused",
+        "icon": "fa6s.pause",
+        "color": QColor("#9a6700"),
+        "animation": False,
+        "bgcolor": "#fff1b8",
+        "border": "#d39e00"
     }
 }
 
@@ -93,9 +110,18 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.templates_frame, "Templates")
         self.tabs.setTabIcon(3, qta.icon("fa6s.image"))
 
-        # Tab 4: About
+        # Tab 4: Recordings
+        self.recordings_frame = RecordingsFrame(self.project_manager, self.script_runner)
+        self.recordings_frame.state_changed.connect(self._on_recordings_state)
+        self.editor_frame.before_script_start = self.recordings_frame.stop_for_script
+        self.editor_frame._toggle_recording_signal.connect(self.recordings_frame.toggle_recording)
+        self.editor_frame._run_recording_hotkey_signal.connect(self.recordings_frame.play_by_id)
+        self.tabs.addTab(self.recordings_frame, "Recordings")
+        self.tabs.setTabIcon(4, qta.icon("fa6s.circle-dot"))
+
+        # Tab 5: About
         self.tabs.addTab(AboutFrame(), "About")
-        self.tabs.setTabIcon(4, qta.icon("mdi.help-circle"))
+        self.tabs.setTabIcon(5, qta.icon("mdi.help-circle"))
 
         # ── Status bar ─────────────────────────────────────
         self._current_icon = None
@@ -152,8 +178,17 @@ class MainWindow(QMainWindow):
     def on_runner_state_change(self, is_running: bool):
         if is_running:
             self.set_state('running')
-        else:
+        elif not self.recordings_frame.player.is_running() and self.recordings_frame.recorder is None:
             self.set_state('stopped')
+
+    def _on_recordings_state(self, state: str):
+        mapped = {
+            "recording": "recording",
+            "playing": "running",
+            "paused": "paused",
+            "stopped": "stopped",
+        }
+        self.set_state(mapped[state])
 
     def set_state(self, state: str):
         self.stateChanged.emit(state)
@@ -198,7 +233,7 @@ class MainWindow(QMainWindow):
             color=self._current_color,
             animation=self._current_animation
         )
-        title = f"Script execution is: {current_state.get('title')}"
+        title = f"Automation state: {current_state.get('title')}"
         self.status_indicator.setPixmap(icon.pixmap(24, 24))
         self.status_indicator.setToolTip(title)
         if getattr(self, "_last_style", None) != style:
@@ -257,7 +292,12 @@ class MainWindow(QMainWindow):
             self.move(x, y)
 
     def closeEvent(self, event):
+        if self.project_manager.is_project_open and not self.project_frame._confirm_project_replacement():
+            event.ignore()
+            return
         self._save_window_geometry()
         if self.script_runner.is_running():
             self.script_runner.stop()
+        if hasattr(self, "recordings_frame"):
+            self.recordings_frame.stop_without_save()
         event.accept()

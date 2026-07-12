@@ -1,10 +1,16 @@
-import keyboard
+import logging
+import sys
+
+from pytomator.core.hotkey_backends import KeyboardHookBackend, WindowsNativeHotkeyBackend
 
 
 class HotkeyManager:
     def __init__(self):
-        self._registered_hotkeys = {}  # action -> handler_id
+        self._registered_hotkeys = {}  # action -> (backend, handler_id)
         self._action_by_hotkey = {}    # hotkey_string -> action
+        self._fallback = KeyboardHookBackend()
+        self._native = WindowsNativeHotkeyBackend() if sys.platform == "win32" else None
+        self.fallback_actions = set()
 
     def register(self, action, hotkey, callback):
         self.unregister(action)
@@ -12,14 +18,26 @@ class HotkeyManager:
         if hotkey in self._action_by_hotkey:
             old_action = self._action_by_hotkey[hotkey]
             self.unregister(old_action)
-        handler_id = keyboard.add_hotkey(hotkey, callback)
-        self._registered_hotkeys[action] = handler_id
+        backend = self._native or self._fallback
+        try:
+            handler_id = backend.register(hotkey, callback)
+            self.fallback_actions.discard(action)
+        except Exception as exc:
+            if backend is self._fallback:
+                raise
+            logging.getLogger(__name__).warning("Native hotkey failed; using hook fallback: %s", exc)
+            backend = self._fallback
+            handler_id = backend.register(hotkey, callback)
+            self.fallback_actions.add(action)
+        self._registered_hotkeys[action] = (backend, handler_id)
         self._action_by_hotkey[hotkey] = action
 
     def unregister(self, action):
-        handler_id = self._registered_hotkeys.pop(action, None)
-        if handler_id:
-            keyboard.remove_hotkey(handler_id)
+        registration = self._registered_hotkeys.pop(action, None)
+        if registration:
+            backend, handler_id = registration
+            backend.unregister(handler_id)
+        self.fallback_actions.discard(action)
         # Remove from reverse map
         for hotkey, act in list(self._action_by_hotkey.items()):
             if act == action:

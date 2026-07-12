@@ -11,6 +11,7 @@ Requires-Dist: pyqt6-qscintilla<3,>=2.14.1
 Requires-Dist: pyautogui<1,>=0.9
 Requires-Dist: pydirectinput<2,>=1.0
 Requires-Dist: keyboard<1,>=0.13
+Requires-Dist: pynput<2,>=1.7
 Requires-Dist: mss<11,>=10.0
 Requires-Dist: pillow<13,>=12.0
 Requires-Dist: qtawesome<2,>=1.4.0

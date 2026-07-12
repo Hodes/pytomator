@@ -29,6 +29,7 @@ class ProjectFrame(QWidget):
         self.project_manager.on("project_loaded", self._on_project_loaded)
         self.project_manager.on("project_closed", self._on_project_closed)
         self.project_manager.on("project_saved", self._on_project_saved)
+        self.project_manager.on("project_dirty_changed", self._on_project_dirty_changed)
 
         self._build_ui()
         self._update_ui_state()
@@ -178,11 +179,7 @@ class ProjectFrame(QWidget):
         if has_project and project:
             self.name_edit.setText(project.name)
             self.description_edit.setText(project.settings.description)
-            path = self.project_manager.project_path
-            path_str = str(path) if path else "(not yet saved)"
-            self.status_label.setText(
-                f"Project: {project.name}  |  Scripts: {len(project.scripts)}  |  {path_str}"
-            )
+            self._update_project_status()
         else:
             self.name_edit.clear()
             self.description_edit.clear()
@@ -325,3 +322,17 @@ class ProjectFrame(QWidget):
 
     def _on_project_saved(self):
         self._update_ui_state()
+
+    def _on_project_dirty_changed(self, _dirty):
+        self._update_project_status()
+
+    def _update_project_status(self):
+        project = self.project_manager.project
+        if project is None:
+            return
+        path = self.project_manager.project_path
+        path_str = str(path) if path else "(not yet saved)"
+        self.status_label.setText(
+            f"Project: {project.name}{' *' if self.project_manager.is_dirty else ''}  |  "
+            f"Scripts: {len(project.scripts)}  |  Recordings: {len(project.recordings)}  |  {path_str}"
+        )

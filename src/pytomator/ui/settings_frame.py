@@ -35,6 +35,9 @@ class SettingsFrame(QWidget):
         self.capture_hotkey_field.addWidget(self.capture_hotkey_lineedit)
         global_layout.addRow(self.capture_hotkey_field)
 
+        self.recording_hotkey_lineedit = QLineEdit()
+        global_layout.addRow("Toggle Recording Hotkey:", self.recording_hotkey_lineedit)
+
         self.layout.addWidget(global_group)
 
         # ── Project Settings ─────────────────────────────────
@@ -56,6 +59,10 @@ class SettingsFrame(QWidget):
         self.project_mouse_backend = QComboBox()
         self.project_mouse_backend.addItem("Standard (PyAutoGUI)", "standard")
         self.project_mouse_backend.addItem("DirectInput", "directinput")
+        self.project_mouse_backend.setToolTip(
+            "DirectInput is recommended for Windows games. Games using exclusive "
+            "Raw Input or anti-cheat protection may still reject synthetic input."
+        )
         project_layout.addRow("Mouse backend:", self.project_mouse_backend)
 
         self.project_mouse_move_duration = QDoubleSpinBox()
@@ -110,6 +117,7 @@ class SettingsFrame(QWidget):
         hotkeys = config.get("hotkeys", {})
         hotkeys["toggle_script"] = self.toggle_run_hotkey_lineedit.text().strip()
         hotkeys["capture_region"] = self.capture_hotkey_lineedit.text().strip()
+        hotkeys["toggle_recording"] = self.recording_hotkey_lineedit.text().strip()
         config["hotkeys"] = hotkeys
         self.config_manager.save_config(config)
 
@@ -117,6 +125,7 @@ class SettingsFrame(QWidget):
         hotkeys = config.get("hotkeys", {})
         self.toggle_run_hotkey_lineedit.setText(hotkeys.get("toggle_script", ""))
         self.capture_hotkey_lineedit.setText(hotkeys.get("capture_region", ""))
+        self.recording_hotkey_lineedit.setText(hotkeys.get("toggle_recording", "ctrl+shift+f8"))
 
     # ------------------------------------------------------------------
     # Project settings

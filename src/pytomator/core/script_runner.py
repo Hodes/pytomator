@@ -58,6 +58,7 @@ class ScriptRunner(EventEmitter):
             return
         
         self.stop()
+        automator_api.release_all_inputs()
         GlobalInterruptionController.clear_global_interruption()
         # Reset the import cache so scripts are re-executed on this run
         reset_import_cache()
@@ -161,5 +162,6 @@ class ScriptRunner(EventEmitter):
         finally:
             sys.settrace(None)
             self._running = False
+            automator_api.release_all_inputs()
             GlobalInterruptionController.clear_global_interruption()
             self.emit("finished")
